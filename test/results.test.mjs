@@ -76,6 +76,10 @@ test('primeira consulta responde na hora e preenche o pedaço em segundo plano',
   assert.strictEqual(payload.items['3550308'].result.abstention.count, 39);
   assert.ok(h.storage.objects.has('6258/2/sp.json'));
   assert.ok(h.storage.objects.has('config/municipios-6258.json'));
+  const published = JSON.parse(h.storage.objects.get('publico/2/sp.json'));
+  assert.deepStrictEqual(published.items, payload.items);
+  assert.strictEqual(published.summary.result.total, 100);
+  assert.ok(published.publishedAt);
 });
 
 test('visitantes simultâneos compartilham uma única atualização e o cache evita novas consultas', async () => {
@@ -150,6 +154,22 @@ test('fotos vêm do TSE uma vez, ficam no R2 e só para candidaturas conhecidas'
   assert.ok(h.storage.objects.has('fotos/6258/100.jpeg'));
   await assert.rejects(h.results.photo('2', '999'), { status: 404 });
   await assert.rejects(h.results.photo('2', '../x'), { status: 400 });
+});
+
+test('pré-carregamento traz todos os estados do R2 sem consultar resultados no TSE', async () => {
+  const storage = memoryStorage();
+  const first = harness({ storage });
+  await (await first.results.scope('2', 'sp')).pending;
+  let reads = 0;
+  const counted = { ...storage, async get(key) { if (key.startsWith('6258/')) reads++; return storage.get(key); } };
+  const second = harness({ storage: counted });
+  await second.results.preload();
+  // Round 1 is not configured in the fake TSE and is skipped; round 2 loads Brasil + 27 UFs.
+  assert.strictEqual(reads, 28);
+  assert.deepStrictEqual(second.requests, [CONFIG_URL]);
+  const { payload } = await second.results.scope('2', 'sp');
+  assert.strictEqual(Object.keys(payload.items).length, 3);
+  assert.strictEqual(reads, 28);
 });
 
 test('mini workers aquecem Brasil e todos os estados em fatias pequenas', async () => {
