@@ -29,6 +29,7 @@ try {
   store.claim();
   if (!once) {
     server = Bun.serve({
+      hostname: '0.0.0.0',
       port: config.port,
       fetch(request) {
         if (new URL(request.url).pathname !== '/healthz') return api.respond(request);

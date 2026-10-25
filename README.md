@@ -8,8 +8,8 @@ Mapa interativo e corrida visual para acompanhar a apuração presidencial. O pr
 frontend/             HTML, CSS, JavaScript, imagens e malhas do site
 backend/              Coletor Bun, SQLite, publicador R2 e dependências
   .env.example        Exemplo de variáveis do servidor
-  Dockerfile          Imagem do coletor para Railway
-  railway.json        Deploy independente do backend
+  Dockerfile          Imagem Bun do backend
+  render.yaml         Deploy independente no Render
   package.json        Dependências e comandos do backend
 test/
   frontend/           Testes do mapa e do navegador
@@ -54,7 +54,7 @@ Revise `backend/.env` antes de iniciar: o coletor consulta o TSE de verdade. O p
 
 Para uma única rodada, use `bun run collector:once`. Os atalhos executam dentro de `backend/`, onde ficam as variáveis, dependências e o banco local em `.collector/`.
 
-No Railway, configure **Root Directory: `/backend`**, **Railway Config File: `/backend/railway.json`** e anexe um volume em `/data`. O [Dockerfile](backend/Dockerfile) usa somente essa pasta. O frontend é publicado separadamente na Cloudflare/Vercel. Consulte a [operação do backend](backend/README.md) e a [configuração do R2](docs/r2.md).
+No Render, crie um **Web Service com Docker**, configure **Root Directory: `backend`** e anexe um disco persistente em `/data`. O passo a passo e a opção de Blueprint estão no [guia do Render](docs/render.md). O [Dockerfile](backend/Dockerfile) usa somente essa pasta. O frontend é publicado separadamente na Cloudflare/Vercel. Consulte a [operação do backend](backend/README.md) e a [configuração do R2](docs/r2.md).
 
 ## Verificações
 
@@ -84,7 +84,8 @@ Resultados oficiais, simulações e demonstrações devem permanecer identificad
 ## Documentação
 
 - [Frontend e uso do mapa](frontend/README.md)
-- [Backend e Railway](backend/README.md)
+- [Backend e execução local](backend/README.md)
+- [Deploy no Render](docs/render.md)
 - [Contrato da API e configuração do frontend](docs/api.md)
 - [Arquitetura de coleta e cache](docs/arquitetura-dados.md)
 - [Publicação no R2, domínio, CORS e cache](docs/r2.md)

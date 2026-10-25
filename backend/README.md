@@ -46,7 +46,7 @@ As variáveis e valores iniciais estão em [`.env.example`](.env.example). O có
 | `COLLECTOR_OTHER_MUNICIPAL_INTERVAL_MS` | Intervalo municipal dos demais cargos |
 | `COLLECTOR_COMPLETE_INTERVAL_MS` | Intervalo mínimo adicional para apuração completa |
 | `COLLECTOR_CONFIG_INTERVAL_MS` | Revalidação da configuração |
-| `PORT` | Porta do diagnóstico; fornecida pelo Railway |
+| `PORT` | Porta do diagnóstico; fornecida pelo Render |
 
 Os intervalos contam a partir da consulta concluída. São mínimos de agenda, não garantia de atraso máximo. Brasil e UF podem ser revisitados durante a varredura, mas sua prioridade é limitada para garantir progresso municipal.
 
@@ -76,16 +76,13 @@ HTTP 200 indica que o processo está ativo, inclusive quando a fonte está indis
 
 O diagnóstico inclui `schemaVersion: 1` para seu próprio formato. Os arquivos públicos também têm schema próprio documentado em [R2](../docs/r2.md). O horário da consulta não substitui o horário de geração da fonte. O campo `publication` informa habilitação, última publicação, falha e URL do manifesto quando disponível.
 
-## Preparar o Railway
+## Preparar o Render
 
-Os arquivos [Dockerfile](Dockerfile), [.dockerignore](.dockerignore) e [railway.json](railway.json) tornam o deploy independente dentro de `backend/`. Nenhum recurso remoto foi criado.
+Os arquivos [Dockerfile](Dockerfile), [.dockerignore](.dockerignore) e [render.yaml](render.yaml) tornam o deploy independente dentro de `backend/`. Nenhum recurso remoto foi criado.
 
-1. Criar um serviço a partir deste repositório. Em Settings, definir **Root Directory: `/backend`** e **Railway Config File: `/backend/railway.json`**. O caminho do arquivo de configuração é relativo à raiz do repositório, mesmo quando o diretório do serviço muda. O Dockerfile é `Dockerfile` dentro de `backend/`; o comando de início é `bun main.mjs`. As alterações monitoradas ficam em `/backend/**`.
-2. Anexar volume persistente em `/data` e manter `COLLECTOR_DB=/data/results.sqlite`.
-3. Configurar UF, turno, limites e, se habilitado, as variáveis R2 nas configurações do serviço. Não enviar o `.env` local nem incluir credenciais no Dockerfile.
-4. Manter uma réplica e coleta contínua durante a apuração; desabilitar Serverless para esse período.
-5. Configurar alertas de crédito/uso e acompanhar o diagnóstico e os logs.
-6. Medir uma coleta da UF antes de aumentar concorrência, cobertura ou frequência.
+O [guia do Render](../docs/render.md) detalha a criação pelo painel ou Blueprint. Usar **Web Service**, runtime **Docker**, **Root Directory: `backend`**, Dockerfile `./Dockerfile` e contexto `.`. O comando de início vem do Dockerfile: `bun main.mjs`.
+
+Para coleta contínua com SQLite persistente, usar serviço pago, uma instância e disco em `/data`, com `COLLECTOR_DB=/data/results.sqlite`. Configurar as variáveis R2 no painel e o healthcheck `/healthz`. O plano Free suspende por inatividade e não oferece disco persistente.
 
 A imagem fixa Bun 1.2.23, versão usada na validação local. Atualizações do runtime devem passar pelos testes antes de alterar essa versão.
 
@@ -107,4 +104,4 @@ Os testes do coletor usam respostas locais, relógio controlado e SQLite tempor�
 - Validar mapa, corrida e resultados na origem de produção após implantar a API.
 - Medir a cobertura nacional real, a idade por cargo/território e o consumo de volume e rede. A ampliação nacional já está implementada e é o padrão.
 
-Referências: [Bun no Railway](https://docs.railway.com/guides/bun), [SQLite no Bun](https://bun.sh/docs/runtime/sqlite), [volumes no Railway](https://docs.railway.com/volumes/reference) e [informações técnicas do TSE](https://www.tse.jus.br/eleicoes/informacoes-tecnicas-sobre-a-divulgacao-de-resultados).
+Referências: [Docker no Render](https://render.com/docs/docker), [SQLite no Bun](https://bun.sh/docs/runtime/sqlite), [discos no Render](https://render.com/docs/disks) e [informações técnicas do TSE](https://www.tse.jus.br/eleicoes/informacoes-tecnicas-sobre-a-divulgacao-de-resultados).

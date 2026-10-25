@@ -6,7 +6,7 @@ The static browser game lives in `frontend/`, including pages, styles, browser s
 
 ## Build, Test, and Development Commands
 
-From the repository root, run `npm run dev:frontend` and open `http://localhost:8000`. `npm run build:frontend` copies public frontend files into `dist/frontend/`; serve and publish only that generated directory. Run `bun run install:backend` to install server dependencies, then `bun run collector` to collect real TSE data. Backend secrets belong in `backend/.env` or Railway variables. Run `npm run test:frontend`, `bun run test:collector`, and `npm run test:browser` (requires Chrome) as appropriate. No linter is configured.
+From the repository root, run `npm run dev:frontend` and open `http://localhost:8000`. `npm run build:frontend` copies public frontend files into `dist/frontend/`; serve and publish only that generated directory. Run `bun run install:backend` to install server dependencies, then `bun run collector` to collect real TSE data. Backend secrets belong in `backend/.env` or Render variables. Run `npm run test:frontend`, `bun run test:collector`, and `npm run test:browser` (requires Chrome) as appropriate. No linter is configured.
 
 ## Coding Style & Naming Conventions
 

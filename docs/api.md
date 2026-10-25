@@ -13,7 +13,7 @@ Em [api-config.js](../frontend/api-config.js), a base padrão é `http://localho
 Para outro endereço, definir `FRONTEND_API_BASE_URL` no build. `FRONTEND_DATA_PREFIX` permite trocar o prefixo quando a base é definida. São variáveis públicas; não colocar credenciais do servidor no frontend.
 
 ```sh
-FRONTEND_API_BASE_URL=https://sua-api.up.railway.app npm run build:frontend
+FRONTEND_API_BASE_URL=https://sua-api.onrender.com npm run build:frontend
 ```
 
 No backend, `API_ALLOWED_ORIGINS` é uma lista separada por vírgula. Os valores iniciais incluem o frontend local na porta 8000 e os domínios conhecidos de produção. Para distribuir pelo R2, configurar o CORS conforme [r2.md](r2.md).
@@ -66,7 +66,7 @@ A corrida usa a API para resultados oficiais e simulação local identificada an
 
 Em terminais separados, na raiz: `bun run collector` e `npm run dev:frontend`. O coletor faz consultas reais conforme `backend/.env`. `GET /healthz` é o diagnóstico; os caminhos públicos aceitam somente GET/HEAD e não expõem arquivos do servidor.
 
-O código está preparado localmente. A implantação Railway e a validação do domínio, R2 e cache de produção ainda estão pendentes.
+O código está preparado localmente. A implantação Render e a validação do domínio, R2 e cache de produção ainda estão pendentes.
 
 As regras de `md` (eleito/segundo turno) e `esae` (sem atribuição) são interpretadas no backend conforme a [especificação EA20 do TSE](https://www.tse.jus.br/eleicoes/eleicoes-2026-content/arquivos/divulgacao-de-resultados/tse-ea20-arquivo-de-resultado-unificado).
 

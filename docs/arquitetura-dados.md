@@ -22,7 +22,7 @@ A integração atual está descrita no [README](../README.md). Este plano manté
 
 ```mermaid
 flowchart LR
-  T[TSE: arquivos oficiais] --> B[Bun no Railway: coleta e validação]
+  T[TSE: arquivos oficiais] --> B[Bun no Render: coleta e validação]
   B --> V[Volume: SQLite e progresso]
   B --> R[R2: resumos publicados]
   R --> C[CDN: domínio de dados]
@@ -32,8 +32,8 @@ flowchart LR
 
 | Componente | Responsabilidade |
 | --- | --- |
-| Bun no Railway | Descobrir configurações, consultar o TSE, validar e publicar resultados |
-| Volume Railway com SQLite | Guardar estado da fila, última leitura válida, hashes e progresso |
+| Bun no Render | Descobrir configurações, consultar o TSE, validar e publicar resultados |
+| Volume Render com SQLite | Guardar estado da fila, última leitura válida, hashes e progresso |
 | R2 Standard | Armazenar os arquivos públicos e versões recentes |
 | CDN com domínio próprio | Distribuir JSONs com cache compartilhado |
 | Cloudflare Pages ou Workers Static Assets | Hospedar HTML, CSS, JavaScript e mapas |
@@ -50,7 +50,7 @@ Uma fila central deve controlar tanto concorrência quanto requisições por seg
 
 O TSE informa máximo de 100 requisições por IP por segundo, com possibilidade de bloqueio por dez minutos. Novas tentativas antes do fim podem reiniciar o bloqueio. Muitos erros 404 também podem provocar bloqueio. Essa regra deve ser reconferida antes de cada operação eleitoral.
 
-Como configuração inicial para medir, usar teto de 40–50 requisições por segundo, espaçadas, com concorrência ajustada à latência observada. Não distribuir requisições entre IPs para contornar limites. Confirmar também as características de saída de rede do Railway antes da operação.
+Como configuração inicial para medir, usar teto de 40–50 requisições por segundo, espaçadas, com concorrência ajustada à latência observada. Não distribuir requisições entre IPs para contornar limites. Confirmar também as características de saída de rede do Render antes da operação.
 
 | Prioridade | Proposta inicial, sujeita a medição |
 | --- | --- |
@@ -153,15 +153,13 @@ Prever backup/checkpoint privado do estado necessário à recuperação. Arquivo
 
 As informações abaixo foram consultadas durante o planejamento em 24/10/2026. Conferir novamente antes de contratar ou publicar. São referências, não promessa de custo final.
 
-### Railway
+### Render
 
-O plano Free anunciado oferece até 1 vCPU, 0,5 GB de RAM por serviço e 0,5 GB de volume. Esses limites são tetos de capacidade, não reserva de consumo gratuito contínuo.
+O backend usa um Web Service com Docker: API HTTP e coletor rodam no mesmo processo Bun. A configuração está em `backend/render.yaml`; o [guia de implantação](render.md) define `backend` como diretório do serviço e SQLite em disco persistente `/data`.
 
-O trial oferece até 30 dias ou US$ 5 em créditos. Depois, o Free fornece US$ 1 em crédito mensal. Como referência, as tarifas de containers consultadas são US$ 10/GB de RAM/mês, US$ 20/vCPU/mês, US$ 0,05/GB de saída de rede e US$ 0,15/GB de volume/mês. Uso e duração determinam a conta; o Hobby tem mínimo de US$ 5 mensais com crédito de uso incluído.
+Para operação contínua com este banco, usar serviço pago e uma instância. O Free suspende após 15 minutos sem tráfego de entrada e não oferece disco persistente. Consultas de saída ao TSE não impedem essa suspensão.
 
-Cem MB médios durante um mês inteiro representam aproximadamente US$ 1 somente em memória. O upload do Railway para o R2 também é tráfego de saída do Railway. Medir memória residente, CPU, volume e bytes publicados antes de prever orçamento.
-
-Começar com os limites pequenos é plausível, sujeito a teste. Guardar resumos em vez de históricos ilimitados e reduzir logs. Garantir rede externa disponível na conta/trial. Durante a apuração, manter coleta contínua; fora dela, reduzir frequência ou parar por programação explícita. Não depender de suspensão automática para economizar um processo que consulta a rede constantemente.
+O Blueprint parte de 0,5 CPU, 512 MB de memória e 1 GB de disco, sujeitos a medição e ajuste. Conferir no painel os valores de máquina, disco e tráfego antes de contratar; não há estimativa de custo validada para a cobertura nacional. Medir memória residente, CPU, volume, rede e idade dos resultados em operação real. Fora da apuração, reduzir a frequência ou parar por programação explícita.
 
 ### R2 Standard e CDN
 
@@ -186,7 +184,7 @@ Pages ou Workers Static Assets atendem ao frontend estático existente. Workers 
 
 Na implementação, criar exemplo seguro de configuração com placeholders para ambiente da fonte, ciclo/turno/cargo, limite de consultas, concorrência, timeouts, intervalos, caminho do SQLite, bucket, endpoint R2 e origem pública de dados.
 
-Guardar credenciais de escrita do R2 somente nas variáveis secretas do Railway, com permissão limitada ao bucket necessário. O frontend recebe apenas URLs públicas. Não criar um proxy que aceite URLs arbitrárias do visitante.
+Guardar credenciais de escrita do R2 somente nas variáveis secretas do Render, com permissão limitada ao bucket necessário. O frontend recebe apenas URLs públicas. Não criar um proxy que aceite URLs arbitrárias do visitante.
 
 Registrar e acompanhar:
 
@@ -253,7 +251,7 @@ Os testes estão divididos entre `test/frontend/` e `test/backend/`, com execuç
 ## Decisões ainda a fechar após as medições
 
 - Pages ou Workers Static Assets para o frontend.
-- Plano/orçamento Railway e janela de operação contínua.
+- Plano/orçamento Render e janela de operação contínua.
 - Intervalo nacional possível e quantidade de consultas simultâneas.
 - Tamanho dos resumos e necessidade de detalhes municipais separados.
 - Janela de retenção de versões e frequência de backup do estado.
@@ -262,10 +260,10 @@ Os testes estão divididos entre `test/frontend/` e `test/backend/`, com execuç
 ## Referências
 
 - [Informações técnicas de divulgação do TSE](https://www.tse.jus.br/eleicoes/informacoes-tecnicas-sobre-a-divulgacao-de-resultados)
-- [Deploy de Bun no Railway](https://bun.sh/guides/deployment/railway)
-- [Trial e crédito gratuito do Railway](https://docs.railway.com/pricing/free-trial)
-- [Planos e tarifas do Railway](https://docs.railway.com/pricing/plans)
-- [Suspensão automática no Railway](https://docs.railway.com/deployments/serverless)
+- [Docker no Render](https://render.com/docs/docker)
+- [Discos persistentes no Render](https://render.com/docs/disks)
+- [Limites do Render Free](https://render.com/docs/free)
+- [Blueprint do Render](https://render.com/docs/blueprint-spec)
 - [Preços e franquia do R2](https://developers.cloudflare.com/r2/pricing/)
 - [Bucket público, domínio próprio e cache do R2](https://developers.cloudflare.com/r2/buckets/public-buckets/)
 - [Cobrança de Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/)
