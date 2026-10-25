@@ -1,0 +1,514 @@
+'use client';
+
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+
+const EMPTY_FILL = '#34465b';
+const STALE_MS = 240000;
+const geometry = new Map();
+const normalize = (value) => String(value).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const pct = (value) => `${value.toFixed(2).replace('.', ',')}%`;
+const count = (value) => value.toLocaleString('pt-BR');
+const share = (value, percent) => (value == null ? '—' : `${count(value)}${percent == null ? '' : ` · ${pct(percent)}`}`);
+
+function validate(data) {
+  if (!Array.isArray(data) || !data.length || !data.every((item) => typeof item.id === 'string' && typeof item.name === 'string' && typeof item.path === 'string' && /^M[\d.,LZM\-]+$/.test(item.path) && Array.isArray(item.center) && item.center.length === 2 && item.center.every(Number.isFinite) && Array.isArray(item.bounds) && item.bounds.length === 4 && item.bounds.every(Number.isFinite))) {
+    throw new Error('Arquivo geográfico inválido.');
+  }
+  return data;
+}
+
+async function fetchMap(filename) {
+  const signal = AbortSignal.timeout(15000);
+  const url = `/data/mapa/${filename}.json`;
+  if ('DecompressionStream' in window) {
+    try {
+      const response = await fetch(`${url}.gz`, { signal });
+      if (!response.ok) throw new Error('Malha compactada indisponível.');
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      // Some hosts decompress .gz responses automatically via Content-Encoding.
+      const data = bytes[0] === 0x1f && bytes[1] === 0x8b
+        ? await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).json()
+        : JSON.parse(new TextDecoder().decode(bytes));
+      return validate(data);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      // Keep working on older browsers and hosts without the .gz assets.
+    }
+  }
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error('Arquivo geográfico indisponível.');
+  return validate(await response.json());
+}
+
+// Share both in-flight requests and loaded data with hover prefetches.
+function loadMap(filename) {
+  if (!geometry.has(filename)) geometry.set(filename, fetchMap(filename).catch((error) => { geometry.delete(filename); throw error; }));
+  return geometry.get(filename);
+}
+
+const resultCache = new Map();
+
+// Rebuild full candidate rows from the shared roster sent once per response.
+function hydrate(data) {
+  const full = (entry) => (entry?.result ? { ...entry, result: { ...entry.result,
+    candidates: entry.result.candidates.map((candidate) => ({ ...data.candidates[candidate.id], ...candidate })) } } : entry);
+  return { ...data, summary: full(data.summary), items: Object.fromEntries(Object.entries(data.items).map(([id, entry]) => [id, full(entry)])) };
+}
+
+// One request per scope at a time, shared by polling and hover prefetch. Unchanged data comes back as a 304
+// from the browser cache (ETag) and is not parsed again.
+function loadResults(round, uf) {
+  const key = `${round}:${uf}`;
+  const cached = resultCache.get(key) || {};
+  resultCache.set(key, cached);
+  cached.pending ||= (async () => {
+    try {
+      const response = await fetch(`/api/resultados/${round}/${uf}`, { signal: AbortSignal.timeout(20000) });
+      const etag = response.headers.get('ETag');
+      if (response.ok && etag && etag === cached.etag) return cached.value;
+      const data = await response.json();
+      if (!response.ok) throw Object.assign(new Error(data.error), { status: response.status });
+      if (data.schemaVersion !== 2 || data.round !== round || data.uf !== uf) throw new Error('Resposta incompatível.');
+      Object.assign(cached, { etag, value: { ...hydrate(data), key } });
+      return cached.value;
+    } finally {
+      cached.at = Date.now();
+      cached.pending = null;
+    }
+  })();
+  return cached.pending;
+}
+
+function describe(entry, round) {
+  const result = entry?.result;
+  if (!result) {
+    if (entry?.error === 'missing') return 'Os resultados ainda não foram divulgados.';
+    if (entry?.error) return 'Não foi possível carregar os resultados. Vamos tentar novamente.';
+    return 'Carregando resultados…';
+  }
+  if (!result.total) return `Aguardando os primeiros resultados do ${round}º turno.`;
+  const stale = entry.error || Date.now() - entry.checkedAt > STALE_MS;
+  const leader = result.candidates.find((item) => item.id === result.leader);
+  const candidates = result.candidates.slice(0, 2).map((item) => `${item.name} (${item.party}) ${pct(item.pct)}`).join(' · ');
+  const counted = result.counted === null ? 'Ainda não sabemos quanto da apuração foi concluído.' : `${pct(result.counted)} das seções de votação apuradas`;
+  return `${candidates}\n${result.tied ? 'Empate' : `Na frente: ${leader?.name || result.candidates[0].name}`}\n${counted}\n${stale ? 'Mostrando os últimos resultados disponíveis' : 'Fonte: TSE'}${result.generation ? ` · Atualizado em ${result.generation}` : ''}`;
+}
+
+function readHash() {
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  return { uf: params.get('uf'), municipality: params.get('municipio'), round: params.get('turno') === '1' ? '1' : '2' };
+}
+
+export default function ElectionMap() {
+  const svgRef = useRef(null);
+  const stageRef = useRef(null);
+  const tooltipRef = useRef(null);
+  const pickerRef = useRef(null);
+  const searchRef = useRef(null);
+  const view = useRef({ current: null, fitted: null, drag: null, suppressClick: false, pointers: new Map(), request: 0, prefetch: null });
+  const scopes = useRef(new Map());
+  const [states, setStates] = useState([]);
+  const [uf, setUf] = useState(null);
+  const [municipalities, setMunicipalities] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [round, setRound] = useState('2');
+  const [message, setMessage] = useState({ text: 'Carregando o Brasil…', error: false, retry: null });
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState(null);
+  const [notice, setNotice] = useState('');
+  const [hidden, setHidden] = useState(false);
+
+  const items = uf ? municipalities : states;
+  const scopeKey = `${round}:${uf?.abbr.toLowerCase() || 'br'}`;
+  const record = useCallback((item) => (results?.key === scopeKey ? results.items[uf ? item.id : item.abbr.toLowerCase()] : null), [results, scopeKey, uf]);
+  const fillOf = (item) => record(item)?.result?.fill || EMPTY_FILL;
+
+  const setViewBox = useCallback((bounds) => {
+    view.current.current = [...bounds];
+    svgRef.current?.setAttribute('viewBox', bounds.join(' '));
+  }, []);
+
+  const zoom = useCallback((factor, anchor) => {
+    const { current, fitted } = view.current;
+    if (!current || !fitted) return;
+    const [x, y, width, height] = current;
+    const ratio = Math.max(.0025, Math.min(1.8, width * factor / fitted[2]));
+    const newWidth = fitted[2] * ratio;
+    const newHeight = fitted[3] * ratio;
+    const center = anchor || { x: x + width / 2, y: y + height / 2 };
+    setViewBox([center.x - (center.x - x) * newWidth / width, center.y - (center.y - y) * newHeight / height, newWidth, newHeight]);
+  }, [setViewBox]);
+
+  const focusMunicipality = useCallback((item) => {
+    const { fitted } = view.current;
+    if (!item || !fitted) return;
+    const [x, y, width, height] = item.bounds;
+    const aspect = fitted[2] / fitted[3];
+    const newWidth = Math.max(width, height * aspect, fitted[2] * .0025) * 2.2;
+    const newHeight = newWidth / aspect;
+    setViewBox([x + width / 2 - newWidth / 2, y + height / 2 - newHeight / 2, newWidth, newHeight]);
+  }, [setViewBox]);
+
+  // Fit the drawn territories before paint so the map never flashes at the wrong zoom.
+  useLayoutEffect(() => {
+    if (!items.length) return;
+    const left = Math.min(...items.map((item) => item.bounds[0]));
+    const top = Math.min(...items.map((item) => item.bounds[1]));
+    const right = Math.max(...items.map((item) => item.bounds[0] + item.bounds[2]));
+    const bottom = Math.max(...items.map((item) => item.bounds[1] + item.bounds[3]));
+    const padding = Math.max(right - left, bottom - top) * .035;
+    view.current.fitted = [left - padding, top - padding, right - left + padding * 2, bottom - top + padding * 2];
+    setViewBox(view.current.fitted);
+  }, [items, setViewBox]);
+
+  const openState = useCallback(async (item, municipalityId) => {
+    const request = ++view.current.request;
+    const retry = () => openState(item, municipalityId);
+    setMessage({ text: `Carregando ${item.name}…`, error: false, retry });
+    try {
+      const list = await loadMap(item.id);
+      if (request !== view.current.request) return;
+      setPickerOpen(false);
+      setQuery('');
+      setMunicipalities(list);
+      setUf(item);
+      setSelected(list.find((town) => town.id === municipalityId) || null);
+      setMessage({ text: '', error: false, retry: null });
+    } catch {
+      if (request !== view.current.request) return;
+      setMessage({ text: 'Não foi possível carregar o mapa deste estado. Tente novamente ou volte ao Brasil.', error: true, retry });
+    }
+  }, []);
+
+  const init = useCallback(async () => {
+    const request = ++view.current.request;
+    setMessage({ text: 'Carregando o Brasil…', error: false, retry: null });
+    try {
+      const list = [...await loadMap('brasil')].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+      if (request !== view.current.request) return;
+      setStates(list);
+      setMessage({ text: '', error: false, retry: null });
+      const hash = readHash();
+      const initial = list.find((item) => item.abbr.toLowerCase() === (hash.uf || '').toLowerCase());
+      if (initial) await openState(initial, hash.municipality);
+    } catch {
+      if (request !== view.current.request) return;
+      setMessage({ text: 'Não foi possível carregar o mapa. Verifique a conexão e tente novamente.', error: true, retry: () => init() });
+    }
+  }, [openState]);
+
+  const home = useCallback(() => {
+    ++view.current.request;
+    setPickerOpen(false);
+    setQuery('');
+    if (!states.length) { init(); return; }
+    setUf(null);
+    setMunicipalities([]);
+    setSelected(null);
+    setMessage({ text: '', error: false, retry: null });
+  }, [init, states.length]);
+
+  const select = useCallback((item) => {
+    if (uf) { setSelected(item); setPickerOpen(false); } else openState(item);
+  }, [openState, uf]);
+
+  const prefetch = useCallback((item) => {
+    clearTimeout(view.current.prefetch);
+    const connection = navigator.connection;
+    if (uf || !item || connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType || '')) return;
+    view.current.prefetch = setTimeout(() => {
+      loadMap(item.id).catch(() => {});
+      // Warm the state's results too, unless they are already fresh in memory.
+      const cached = resultCache.get(`${round}:${item.abbr.toLowerCase()}`);
+      if (!cached?.pending && Date.now() - (cached?.at || 0) > 10000) loadResults(round, item.abbr.toLowerCase()).catch(() => {});
+    }, 120);
+  }, [round, uf]);
+
+  useEffect(() => {
+    setRound(readHash().round);
+    init();
+  }, [init]);
+
+  useEffect(() => {
+    if (!states.length) return;
+    const params = new URLSearchParams();
+    if (uf) params.set('uf', uf.abbr);
+    if (selected) params.set('municipio', selected.id);
+    if (round !== '2') params.set('turno', round);
+    history.replaceState(null, '', `${location.pathname}${location.search}${params.size ? `#${params}` : ''}`);
+  }, [round, selected, states.length, uf]);
+
+  useEffect(() => {
+    const onVisibility = () => setHidden(document.hidden);
+    onVisibility();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
+  // Poll the shared server cache for the open scope only; faster while the server is still filling it.
+  // Starts with the geometry, not after it, so colors and numbers arrive together with the map.
+  useEffect(() => {
+    const key = scopeKey;
+    const [scopeRound, scopeUf] = key.split(':');
+    setResults(resultCache.get(key)?.value || null);
+    setNotice('');
+    if (hidden) return;
+    let active = true;
+    let timer;
+    const tick = async () => {
+      let delay = 10000;
+      try {
+        const value = await loadResults(scopeRound, scopeUf);
+        if (!active) return;
+        setResults(value);
+        setNotice('');
+        if (value.filling) delay = 3000;
+      } catch (error) {
+        if (!active) return;
+        setNotice(error.status === 404 ? 'Este turno ainda não está disponível.' : 'Não foi possível atualizar. Mostrando os últimos dados disponíveis.');
+        delay = 30000;
+      }
+      timer = setTimeout(tick, delay + Math.random() * 1000);
+    };
+    tick();
+    return () => { active = false; clearTimeout(timer); };
+  }, [hidden, scopeKey]);
+
+  useEffect(() => {
+    const onPointerDown = (event) => { if (!pickerRef.current?.contains(event.target)) setPickerOpen(false); };
+    const onKeyDown = (event) => {
+      if (event.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
+        event.preventDefault();
+        setPickerOpen(true);
+      }
+      if (event.key === 'Escape') {
+        if (pickerRef.current?.open) setPickerOpen(false);
+        else if (selected) setSelected(null);
+        else if (uf) home();
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => { document.removeEventListener('pointerdown', onPointerDown); document.removeEventListener('keydown', onKeyDown); };
+  }, [home, selected, uf]);
+
+  useEffect(() => { if (pickerOpen) searchRef.current?.focus(); }, [pickerOpen]);
+
+  const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
+  const eventItem = (event) => itemsById.get(event.target.closest?.('.territory')?.dataset.id);
+
+  function showTooltip(event, item) {
+    const tooltip = tooltipRef.current;
+    if (view.current.drag?.moved) return;
+    const rect = stageRef.current.getBoundingClientRect();
+    tooltip.textContent = `${uf ? item.name : `${item.name} · ${item.abbr}`}\n${describe(record(item), round)}`;
+    tooltip.hidden = false;
+    tooltip.style.left = `${Math.max(8, Math.min(event.clientX - rect.left + 16, rect.width - tooltip.offsetWidth - 8))}px`;
+    tooltip.style.top = `${Math.max(8, Math.min(event.clientY - rect.top - tooltip.offsetHeight - 12, rect.height - tooltip.offsetHeight - 8))}px`;
+  }
+  const hideTooltip = () => { if (tooltipRef.current) tooltipRef.current.hidden = true; };
+
+  // Use SVG coordinates so dragging and two-finger zoom work at every size.
+  const svgPoint = (x, y) => new DOMPoint(x, y).matrixTransform(svgRef.current.getScreenCTM().inverse());
+  function startGesture() {
+    const state = view.current;
+    const points = [...state.pointers.values()];
+    if (!points.length) { state.drag = null; return; }
+    if (points.length > 1) {
+      const center = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
+      state.drag = { pinch: true, distance: Math.max(1, Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y)), anchor: svgPoint(center.x, center.y), view: [...state.current], moved: true };
+      state.suppressClick = true;
+    } else {
+      state.drag = { x: points[0].x, y: points[0].y, view: [...state.current], moved: false, matrix: svgRef.current.getScreenCTM().inverse() };
+    }
+  }
+  function onPointerDown(event) {
+    const state = view.current;
+    if (!state.current || event.button !== 0) return;
+    if (!state.pointers.size) state.suppressClick = false;
+    state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    startGesture();
+  }
+  function onPointerMove(event) {
+    const state = view.current;
+    const item = eventItem(event);
+    if (item) showTooltip(event, item); else hideTooltip();
+    const drag = state.drag;
+    if (!drag || !state.pointers.has(event.pointerId)) return;
+    state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const svg = svgRef.current;
+    if (drag.pinch && state.pointers.size > 1) {
+      const points = [...state.pointers.values()];
+      const distance = Math.max(1, Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y));
+      setViewBox(drag.view);
+      zoom(drag.distance / distance, drag.anchor);
+      hideTooltip();
+      svg.setPointerCapture(event.pointerId);
+      return;
+    }
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+    drag.moved = true;
+    state.suppressClick = true;
+    svg.setPointerCapture(event.pointerId);
+    svg.classList.add('dragging');
+    hideTooltip();
+    const [x, y, width, height] = drag.view;
+    setViewBox([x - dx * drag.matrix.a - dy * drag.matrix.c, y - dx * drag.matrix.b - dy * drag.matrix.d, width, height]);
+  }
+  function stopDrag(event) {
+    const state = view.current;
+    if (!state.pointers.has(event.pointerId)) return;
+    state.pointers.delete(event.pointerId);
+    const svg = svgRef.current;
+    if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
+    svg.classList.remove('dragging');
+    startGesture();
+    // Keep the synthetic click after a drag or pinch from choosing a city.
+    if (!state.pointers.size) setTimeout(() => { state.suppressClick = false; }, 0);
+  }
+
+  const paths = useMemo(() => items.map((item) => {
+    const entry = record(item);
+    const stale = Boolean(entry?.result && (entry.error || Date.now() - entry.checkedAt > STALE_MS));
+    const text = describe(entry, round);
+    return (
+      <path key={item.id} d={item.path} fillRule="evenodd" data-id={item.id} tabIndex={0} role="button"
+        className={`territory${uf ? ' municipality' : ''}${stale ? ' is-stale' : ''}${selected?.id === item.id ? ' is-selected' : ''}`}
+        style={{ '--territory-fill': entry?.result?.fill || EMPTY_FILL }}
+        aria-pressed={selected?.id === item.id}
+        aria-label={`${uf ? 'Selecionar' : 'Explorar'} ${item.name}. ${text.replaceAll('\n', '. ')}`}>
+        <title>{`${item.name}\n${text}`}</title>
+      </path>
+    );
+  }), [items, record, round, selected, uf]);
+
+  const filtered = pickerOpen ? items.filter((item) => normalize(`${item.name} ${item.abbr || ''} ${item.id}`).includes(normalize(query.trim()))) : [];
+  const entries = items.map(record);
+  const checked = entries.filter(Boolean).length;
+  const withVotes = entries.filter((entry) => entry?.result?.total > 0).length;
+  const progress = `${checked}/${items.length} ${uf ? 'cidades' : 'estados'}`;
+  // The panel follows what is open: Brasil, the state, or the selected city.
+  const panelEntry = selected ? record(selected) : results?.key === scopeKey ? results.summary : null;
+  const panel = panelEntry?.result;
+  const legend = panel?.candidates || entries.find((entry) => entry?.result)?.result.candidates || [];
+  const place = selected ? `${selected.name} · ${uf.abbr}` : uf ? uf.name : 'Brasil';
+  const status = hidden ? 'As atualizações voltam quando você retornar.' : notice
+    || (results?.pausedUntil ? 'O TSE pediu uma pausa nas consultas. Mostrando os últimos dados disponíveis.' : '')
+    || `${withVotes ? 'Resultados' : 'Aguardando os primeiros resultados'} · ${progress}${results?.filling ? ' · carregando' : ''}`;
+  const district = uf?.abbr === 'DF';
+  const hint = selected ? '' : uf ? (district ? 'Explore o território do Distrito Federal' : 'Clique em um município para selecionar') : 'Clique em um estado para explorar';
+
+  return (
+    <section ref={stageRef} className={`map-stage${uf ? ' is-state-view' : ''}${selected ? ' has-selection' : ''}`} aria-label="Explorador geográfico do Brasil">
+      <svg ref={svgRef} id="brazil-map" aria-busy={Boolean(message.text && !message.error)}
+        aria-label={uf ? `Mapa de ${uf.name}, com territórios clicáveis` : 'Mapa interativo dos 26 estados e do Distrito Federal'}
+        onClick={(event) => { const item = eventItem(event); if (item && !view.current.suppressClick) select(item); }}
+        onKeyDown={(event) => { const item = eventItem(event); if (item && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); select(item); } }}
+        onPointerOver={(event) => { if (event.pointerType === 'mouse') prefetch(eventItem(event)); }}
+        onFocus={(event) => prefetch(eventItem(event))}
+        onPointerOut={() => { clearTimeout(view.current.prefetch); hideTooltip(); }}
+        onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={stopDrag} onPointerCancel={stopDrag}
+        onPointerLeave={(event) => { if (!view.current.drag?.moved) stopDrag(event); }}
+        onLostPointerCapture={(event) => { if (view.current.pointers.has(event.pointerId)) stopDrag(event); }}
+        onDoubleClick={(event) => { event.preventDefault(); zoom(.5, svgPoint(event.clientX, event.clientY)); }}>
+        <g>{paths}</g>
+        <g aria-hidden="true">
+          {!uf && states.map((item) => <text key={item.id} x={item.center[0]} y={item.center[1]} className="state-label">{item.abbr}</text>)}
+        </g>
+      </svg>
+
+      <nav className="breadcrumbs" aria-label="Localização no mapa">
+        <button type="button" title="Voltar ao mapa do Brasil" onClick={home}>Brasil</button>
+        {uf && <span>{uf.name}</span>}
+      </nav>
+
+      <aside className="election-legend" aria-label="Legenda dos resultados eleitorais">
+        <div className="election-heading">
+          <strong>Presidente</strong>
+          <select aria-label="Turno da eleição" value={round} onChange={(event) => setRound(event.target.value)}>
+            <option value="2">2º turno</option>
+            <option value="1">1º turno</option>
+          </select>
+        </div>
+        <div className="election-place">{place}</div>
+        <div className="election-candidates">
+          {legend.map((candidate) => (
+            <div className="candidate-row" key={candidate.id}>
+              <span className="candidate-portrait" aria-hidden="true" style={{ '--candidate-color': candidate.color }}>
+                {candidate.name.trim().charAt(0)}
+                <img src={`/api/fotos/${round}/${candidate.id}`} alt="" width={40} height={40} loading="lazy" decoding="async"
+                  onError={(event) => event.currentTarget.remove()} />
+              </span>
+              <span className="candidate-name"><strong>{candidate.name}</strong><small>{candidate.party}</small></span>
+              <span className="candidate-score">
+                <strong style={{ color: candidate.color }}>{panel ? pct(candidate.pct) : '—'}</strong>
+                <small>{panel ? `${count(candidate.votes)} votos` : ''}</small>
+              </span>
+              <span className="candidate-bar" aria-hidden="true"><i style={{ width: `${panel ? candidate.pct : 0}%`, background: candidate.color }} /></span>
+            </div>
+          ))}
+        </div>
+        <dl className="election-totals">
+          <div><dt>Seções apuradas</dt><dd>{panel?.counted != null ? pct(panel.counted) : '—'}</dd></div>
+          <div><dt>Brancos</dt><dd>{share(panel?.votes?.blank, panel?.votes?.blankPct)}</dd></div>
+          <div><dt>Nulos</dt><dd>{share(panel?.votes?.null, panel?.votes?.nullPct)}</dd></div>
+          <div><dt>Abstenção</dt><dd>{share(panel?.abstention?.count, panel?.abstention?.pct)}</dd></div>
+        </dl>
+        {panel?.generation && <small className="election-updated">TSE · atualizado em {panel.generation}</small>}
+        <p role="status" title={`${progress}. O mapa é atualizado automaticamente.`}>{status}</p>
+        <small>Cor mais forte indica maior vantagem na votação.</small>
+      </aside>
+
+      <details ref={pickerRef} className="place-picker" open={pickerOpen} onToggle={(event) => setPickerOpen(event.currentTarget.open)}>
+        <summary onClick={(event) => { event.preventDefault(); setPickerOpen(!pickerOpen); }}>
+          <span aria-hidden="true">⌕</span><span>{uf ? 'Buscar município' : 'Buscar estado'}</span><span className="picker-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div className="picker-content">
+          <label className="search-box">
+            <input ref={searchRef} type="search" value={query} onChange={(event) => setQuery(event.target.value)} autoComplete="off"
+              placeholder={uf ? 'Buscar cidade' : 'Buscar estado ou sigla'} aria-label={uf ? 'Buscar cidade' : 'Buscar estado ou sigla'} />
+          </label>
+          <div className="territory-list" aria-label={uf ? `Territórios de ${uf.name}` : 'Estados do Brasil'}>
+            {filtered.map((item) => (
+              <button key={item.id} type="button" className="territory-row" aria-pressed={selected?.id === item.id}
+                onClick={() => { select(item); if (uf) focusMunicipality(item); }}
+                onPointerEnter={() => { svgRef.current.querySelector(`[data-id="${item.id}"]`)?.classList.add('is-highlighted'); prefetch(item); }}
+                onPointerLeave={() => { clearTimeout(view.current.prefetch); svgRef.current.querySelector(`[data-id="${item.id}"]`)?.classList.remove('is-highlighted'); }}>
+                <span className="region-dot" style={{ '--dot-color': fillOf(item) }} />
+                <span className="row-name">{item.name}</span>
+                <small>{item.abbr || item.id}</small>
+                <span className="row-arrow">↗</span>
+              </button>
+            ))}
+          </div>
+          {pickerOpen && !filtered.length && <p className="empty-search">Nenhum lugar encontrado.</p>}
+        </div>
+      </details>
+
+      {message.text && (
+        <div className="map-message" role="status">
+          <span>{message.text}</span>
+          {message.error && <button type="button" onClick={() => message.retry?.()}>Tentar novamente</button>}
+        </div>
+      )}
+      <div ref={tooltipRef} className="map-tooltip" hidden />
+      <div className="zoom-controls" aria-label="Controles do mapa">
+        <button type="button" aria-label="Aproximar mapa" title="Aproximar" onClick={() => zoom(.75)}>+</button>
+        <button type="button" aria-label="Afastar mapa" title="Afastar" onClick={() => zoom(1.33)}>−</button>
+        <button type="button" aria-label="Ajustar mapa à tela" title="Ajustar à tela" onClick={() => { if (view.current.fitted) setViewBox(view.current.fitted); }}>⛶</button>
+      </div>
+      {hint && <div className="map-hint">{hint}</div>}
+      {selected && uf && (
+        <div className="map-selection" role="status" aria-live="polite">
+          <div><span>{uf.name}</span><strong>{selected.name}</strong></div>
+          <button type="button" aria-label="Aproximar município selecionado" title="Aproximar município" onClick={() => focusMunicipality(selected)}>⛶</button>
+          <button type="button" aria-label="Limpar município selecionado" onClick={() => setSelected(null)}>×</button>
+        </div>
+      )}
+      <a className="map-credit" href="https://servicodados.ibge.gov.br/api/docs/malhas?versao=3" target="_blank" rel="noopener" title="Mapa: IBGE. Resultados: TSE. A cor mostra quem está na frente na votação.">Mapa: IBGE · Resultados: TSE</a>
+    </section>
+  );
+}

@@ -1,14 +1,20 @@
 {
-  "name": "corrida-da-apuracao-repository",
+  "name": "corrida-da-apuracao",
   "private": true,
+  "type": "module",
   "scripts": {
-    "build:frontend": "node frontend/build.mjs",
-    "dev:frontend": "npm run build:frontend && python3 -m http.server 8000 --directory dist/frontend",
-    "install:backend": "bun install --cwd backend --frozen-lockfile",
-    "collector": "bun run --cwd backend collector",
-    "collector:once": "bun run --cwd backend collector:once",
-    "test:collector": "bun run --cwd backend test",
-    "test:frontend": "node --test test/frontend/electoral-map.mjs",
-    "test:browser": "npm run build:frontend && node test/frontend/map-loading.mjs && node test/frontend/electoral-map-browser.mjs"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1156.0",
+    "next": "16.4.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "engines": {
+    "node": ">=22.13.0"
   }
 }
