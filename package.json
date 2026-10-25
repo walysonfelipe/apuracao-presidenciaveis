@@ -1,0 +1,14 @@
+{
+  "name": "corrida-da-apuracao-repository",
+  "private": true,
+  "scripts": {
+    "build:frontend": "node frontend/build.mjs",
+    "dev:frontend": "npm run build:frontend && python3 -m http.server 8000 --directory dist/frontend",
+    "install:backend": "bun install --cwd backend --frozen-lockfile",
+    "collector": "bun run --cwd backend collector",
+    "collector:once": "bun run --cwd backend collector:once",
+    "test:collector": "bun run --cwd backend test",
+    "test:frontend": "node --test test/frontend/electoral-map.mjs",
+    "test:browser": "npm run build:frontend && node test/frontend/map-loading.mjs && node test/frontend/electoral-map-browser.mjs"
+  }
+}

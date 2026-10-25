@@ -7,7 +7,7 @@
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="/favicon.png" sizes="256x256" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <meta name="description" content="Resultados da eleição 2026 por estado: presidente, governador, senador, deputados federais e deputados estaduais, com dados oficiais do TSE." />
+    <meta name="description" content="Resultados eleitorais por estado, preparados pela API com dados oficiais do TSE." />
     <link rel="canonical" href="https://corridaeleicao.vercel.app/estados.html" />
     <title>Resultados por Estado — Corrida da Apuração</title>
     <meta property="og:type" content="website" />
@@ -27,8 +27,6 @@
 
       gtag('config', 'G-LZXPFM03VW');
     </script>
-    <link rel="preconnect" href="https://resultados.tse.jus.br" crossorigin />
-    <link rel="preconnect" href="https://resultados.tse.jus.br" />
     <link rel="stylesheet" href="estados.css" />
   </head>
   <body>
@@ -38,7 +36,7 @@
           <img class="brand-logo" src="logo.webp" alt="Corrida da Apuração" />
         </a>
         <div class="page-tag"><span class="page-flag" aria-hidden="true"></span><span class="page-title">RESULTADOS POR ESTADO</span><span class="tag-divider">·</span><span>BRASIL 2026</span></div>
-        <div class="status-tag" id="status-tag" data-state="loading" role="status"><span class="status-dot" aria-hidden="true"></span><span id="status-text">CONECTANDO AO TSE</span></div>
+        <div class="status-tag" id="status-tag" data-state="loading" role="status"><span class="status-dot" aria-hidden="true"></span><span id="status-text">ATUALIZANDO RESULTADOS</span></div>
       </header>
 
       <section class="filters" aria-label="Filtros">
@@ -56,9 +54,9 @@
         </label>
         <label class="toggle">
           <input id="elected-only" type="checkbox" />
-          <span>Só eleitos / 2º turno (inclui projeção)</span>
+          <span>Só eleitos / 2º turno</span>
         </label>
-        <a class="back-link" href="index.html">← Voltar à corrida</a>
+        <a class="back-link" href="index.html">← Voltar ao mapa</a>
       </section>
 
       <nav class="office-tabs" id="office-tabs" aria-label="Cargo"></nav>
@@ -87,6 +85,8 @@
         <span class="credit">CRIADO POR <a href="https://walysonassis.online" target="_blank" rel="noopener">WALYSON · WALYSONASSIS.ONLINE</a></span>
       </footer>
     </main>
+    <script src="api-config.js" defer></script>
+    <script src="api-client.js" defer></script>
     <script src="estados.js" defer></script>
   </body>
 </html>

@@ -1,0 +1,9 @@
+[
+  {
+    "AllowedOrigins": ["https://corridaeleicao.vercel.app", "https://eleicoes.agendasalao.com"],
+    "AllowedMethods": ["GET", "HEAD"],
+    "AllowedHeaders": ["If-None-Match"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]

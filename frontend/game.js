@@ -28,16 +28,14 @@ const state = {
   camera: { x: 0, y: 0, zoom: 1, ready: false },
   // 'live' follows the TSE schedule; 'sim' plays a local fictitious count.
   source: 'live', lastOfficial: null, simTimer: 0, simRun: 0,
-  // Real-time mode skips the 17h wait and polls the TSE every few seconds.
-  realtime: false, resultUrl: null, pollTimer: 0,
+  // Real-time mode skips the 17h wait and polls our API every few seconds.
+  realtime: false, connected: false, pollTimer: 0,
   // From 17h BRT on election day real time is forced and cannot be changed.
   locked: false, lockTimer: 0, round: 0,
   // Immersive mode shows only the track, filling the whole screen.
   immersive: false, topInset: 0,
 };
 const LEADER_ZOOM = 2.6;
-const TSE_BASE = 'https://resultados.tse.jus.br';
-const ELECTIONS_CONFIG_URL = `${TSE_BASE}/oficial/comum/config/ele-c.json`;
 const POLL_INTERVAL = 30_000;
 const REALTIME_INTERVAL = 5_000;
 // After 17h, how long the automatic switch has before the manual button shows.
@@ -158,183 +156,85 @@ function displayOfficialStatus(isOfficial, message = '') {
   const detail = document.querySelector('#source-detail');
   setStatusBadge(isOfficial ? 'official' : 'demo', isOfficial ? 'DADOS OFICIAIS DO TSE' : 'MODO DEMONSTRAÇÃO');
   label.textContent = isOfficial ? 'FONTE OFICIAL · TSE' : 'DADOS ILUSTRATIVOS';
-  detail.textContent = message || (isOfficial ? 'Resultado nacional · arquivo EA20' : 'Aguardando dados oficiais');
+  detail.textContent = message || (isOfficial ? 'Resultado nacional · resultado nacional' : 'Aguardando dados oficiais');
 }
 
-function parseTseNumber(value) {
+function numeric(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
   const number = Number.parseFloat(String(value ?? '0').replace(',', '.'));
   return Number.isFinite(number) ? number : 0;
 }
 
-// Returns the presidential elections of 2026 keyed by round (1 and, once the
-// TSE configures it, 2).
-function findPresidentialElections(config) {
-  const rounds = {};
-  for (const cycle of config.pl || []) {
-    if (cycle.c !== 'ele2026') continue;
-    for (const election of cycle.e || []) {
-      const hasPresident = (election.abr || []).some((scope) =>
-        scope.cd === 'br' && (scope.cp || []).some((office) => String(office.cd).padStart(4, '0') === '0001'));
-      const round = String(election.t);
-      if (hasPresident && (round === '1' || round === '2')) {
-        rounds[round] = {
-          cycle: cycle.c, electionCode: String(election.cd),
-          date: election.dt || (round === '1' ? cycle.dt : null),
-        };
-      }
-    }
-  }
-  if (!rounds[1] && !rounds[2]) throw new Error('A eleição presidencial de 2026 ainda não aparece na configuração do TSE.');
-  return rounds;
-}
-
-function buildResultUrl(config, election, filename) {
-  const template = (config.arq || []).find((file) => file.tp === 'u');
-  if (!template?.dir) throw new Error('A configuração do TSE não contém o diretório do arquivo EA20.');
-  const directory = template.dir
-    .replaceAll('<base>', TSE_BASE)
-    .replaceAll('<ambiente>', 'oficial')
-    .replaceAll('<ciclo>', election.cycle)
-    .replaceAll('<cd_eleicao>', election.electionCode)
-    .replaceAll('<uf>', 'br');
-  return `${directory}/${filename}`;
-}
-
-// The TSE marks each candidate's situation (`st`, `e`); `md` says the result
-// is mathematically defined. On election night `md` can arrive before `st`.
 const OUTCOME_LABELS = { elected: 'ELEITO', runoff: '2º TURNO' };
 const OUTCOME_SHORT = { elected: '✓', runoff: '2T' };
 
-function candidateOutcome(candidate) {
-  const status = String(candidate.st || '').toLowerCase();
-  if (/2[ºo°]\s*turno|segundo turno/.test(status)) return 'runoff';
-  if (candidate.e === 's' || (status.includes('eleito') && !/n[ãa]o/.test(status))) return 'elected';
-  return '';
-}
-
-// Only when the TSE says the result is defined (`md`) or the count reached
-// 100%, but `st` is still empty: more than half of the valid votes elects; otherwise the top two go to
-// the runoff (first round only).
-function applyDefinedOutcome(result, candidateDrivers) {
-  const complete = result.tf === 's' || parseTseNumber(result.s?.pst) >= 100;
-  if ((result.md !== 's' && !complete) || candidateDrivers.some((driver) => driver.outcome)) return;
-  const validTotal = candidateDrivers.reduce((total, driver) => total + driver.voteCount, 0);
-  const ranked = [...candidateDrivers].sort((a, b) => b.voteCount - a.voteCount);
-  if (!validTotal || !ranked.length) return;
-  if (ranked[0].voteCount / validTotal > .5 || String(result.t) === '2') ranked[0].outcome = 'elected';
-  else ranked.slice(0, 2).forEach((driver) => { driver.outcome = 'runoff'; });
-}
-
 function flattenCandidates(result) {
-  const presidential = (result.carg || []).find((office) => String(office.cd).padStart(4, '0') === '0001');
-  if (!presidential) throw new Error('O arquivo EA20 ainda não contém o cargo de presidente.');
-  const votes = result.v || {};
-  const validVotes = parseTseNumber(votes.vv);
-  const blankVotes = parseTseNumber(votes.vb);
-  const nullVotes = parseTseNumber(votes.vn);
-  const candidates = (presidential.agr || []).flatMap((group) =>
-    (group.par || []).flatMap((party) =>
-      (party.cand || []).map((candidate) => ({ candidate, party, group }))));
-  const usable = candidates.filter(({ candidate }) => !String(candidate.dvt || '').toLowerCase().includes('anulado'));
-  const candidateVoteTotal = usable.reduce((total, item) => total + parseTseNumber(item.candidate.vap), 0);
-  const voteTotal = parseTseNumber(votes.tv) || validVotes + blankVotes + nullVotes || validVotes || candidateVoteTotal;
-  const candidateDrivers = usable.map(({ candidate, party, group }, index) => {
-    const votesCount = parseTseNumber(candidate.vap);
-    const old = drivers.find((driver) => driver.id === String(candidate.sqcand || candidate.n));
-    const colorPair = old ? [old.color, old.glow] : kartPalette[index % kartPalette.length];
-    return {
-      id: String(candidate.sqcand || candidate.n || index),
-      name: candidate.nmu || candidate.nm || 'Candidatura',
-      party: party.sg || group.com || group.nm || 'PARTIDO',
-      votes: voteTotal ? votesCount / voteTotal * 100 : 0,
-      voteCount: votesCount,
-      outcome: candidateOutcome(candidate),
-      validPct: parseTseNumber(candidate.pvapn || candidate.pvap),
-      currentVotes: old?.currentVotes ?? (voteTotal ? votesCount / voteTotal * 100 : 0),
-      color: colorPair[0], glow: colorPair[1],
-    };
+  const voteTotal = result.votes?.total ?? result.total;
+  const candidates = result.candidates.map((candidate, index) => {
+    const old = drivers.find((driver) => driver.id === candidate.id);
+    const color = candidate.color || kartPalette[index % kartPalette.length][0];
+    const share = voteTotal ? candidate.votes / voteTotal * 100 : 0;
+    return { id: candidate.id, name: candidate.name, party: candidate.party,
+      voteCount: candidate.votes, votes: share, validPct: candidate.pct, outcome: candidate.outcome || '',
+      currentVotes: old?.currentVotes ?? share, color, glow: color };
   });
-  applyDefinedOutcome(result, candidateDrivers);
-  const specialDrivers = [
-    { id: 'tse-blank', name: 'Brancos', party: 'VOTOS EM BRANCO', count: blankVotes, color: '#f5f7fa', glow: '#ffffff' },
-    { id: 'tse-null', name: 'Nulos', party: 'VOTOS NULOS', count: nullVotes, color: '#a8b2c2', glow: '#d2d9e3' },
-  ].map(({ id, name, party, count, color, glow }) => {
-    const old = drivers.find((driver) => driver.id === id);
+  for (const [type, name, color] of [['blank', 'Brancos', '#f5f7fa'], ['null', 'Nulos', '#a8b2c2']]) {
+    const count = result.votes?.[type];
+    if (!Number.isFinite(count)) continue;
+    const id = `special-${type}`;
     const share = voteTotal ? count / voteTotal * 100 : 0;
-    return {
-      id, name, party, voteCount: count, votes: share,
-      currentVotes: old?.currentVotes ?? share,
-      color: old?.color ?? color, glow: old?.glow ?? glow,
-    };
-  });
-  return [...candidateDrivers, ...specialDrivers].sort((a, b) => b.votes - a.votes);
+    candidates.push({ id, name, party: name.toUpperCase(), voteCount: count, votes: share,
+      currentVotes: drivers.find((driver) => driver.id === id)?.currentVotes ?? share, color, glow: color });
+  }
+  return candidates.sort((a, b) => b.votes - a.votes);
 }
 
 function updateOfficialMetadata(result) {
-  const sectionPct = Math.min(100, Math.max(0, parseTseNumber(result.s?.pst)));
+  const sectionPct = Math.min(100, Math.max(0, Number(result.counted) || 0));
   state.sectionPct = sectionPct;
   document.querySelector('#sections-percent').textContent = `${formatVote(sectionPct)}%`;
   document.querySelector('#sections-progress').style.width = `${sectionPct}%`;
-  const totalVotes = parseTseNumber(result.v?.tv) || parseTseNumber(result.v?.vv);
-  document.querySelector('#total-votes').textContent = totalVotes
-    ? `${new Intl.NumberFormat('pt-BR').format(totalVotes)} votos`
-    : '— votos';
-  const timestamp = `${result.dg || ''} ${result.hg || ''}`.trim();
-  document.querySelector('#last-update').textContent = timestamp || 'Atualizado pelo TSE';
-  document.querySelector('#source-detail').textContent = `Brasil · EA20 · geração ${timestamp || 'informada pelo TSE'}`;
-  state.resultRound = String(result.t || state.round || '1');
-  if (result.tf === 's') {
-    document.querySelector('.lap-counter strong').innerHTML = 'FINAL <i>✓</i>';
-  } else if (result.md === 's') {
-    document.querySelector('.lap-counter strong').innerHTML = 'DEFINIDO <i>⚑</i>';
-  } else {
-    document.querySelector('.lap-counter strong').innerHTML = '01 <i>/</i> 01';
-  }
+  const total = result.votes?.total ?? result.total;
+  document.querySelector('#total-votes').textContent = `${new Intl.NumberFormat('pt-BR').format(total)} votos`;
+  document.querySelector('#last-update').textContent = result.generation || 'Horário da fonte indisponível';
+  document.querySelector('#source-detail').textContent = `Brasil · geração ${result.generation || 'indisponível'}`;
+  state.resultRound = result.round || String(state.round);
+  document.querySelector('.lap-counter strong').innerHTML = result.complete ? 'FINAL <i>✓</i>' : result.defined ? 'DEFINIDO <i>⚑</i>' : '01 <i>/</i> 01';
 }
 
-async function connectToTse() {
+async function connectToApi() {
   try {
-    const configResponse = await fetch(ELECTIONS_CONFIG_URL, { cache: 'no-cache' });
-    if (!configResponse.ok) throw new Error(`Configuração do TSE indisponível (${configResponse.status}).`);
-    const config = await configResponse.json();
-    const elections = findPresidentialElections(config);
-    [1, 2].forEach((round) => {
-      if (elections[round]?.date) state.roundDates[round] = elections[round].date;
-    });
+    const catalog = await ResultsApi.catalog();
+    for (const [round, entry] of Object.entries(catalog.rounds || {})) {
+      const date = entry.offices?.['1']?.scopes?.br?.date || entry.date;
+      if (date) state.roundDates[round] = date;
+    }
     const { round } = realtimeWindow();
-    const election = elections[round] || elections[1] || elections[2];
-    const code = election.electionCode.padStart(6, '0');
-    state.resultUrl = buildResultUrl(config, election, `br-c0001-e${code}-u.json`);
+    if (!catalog.rounds?.[round]) throw new Error('Turno ainda indisponível na API.');
+    state.connected = true;
     state.electionDate = state.roundDates[round];
     const wasLocked = state.locked;
     scheduleRealtimeLock();
-    // Locking already started polling the TSE.
     if (!wasLocked && state.locked) return;
     const delay = state.realtime ? 0 : delayUntilDisclosure(state.electionDate);
-    if (delay > 0) {
-      if (state.source === 'live') displayOfficialStatus(false, 'A divulgação do TSE começa às 17h BRT · placar ilustrativo');
-      schedulePoll(pollTseResults, delay);
-    } else {
-      await pollTseResults();
-    }
+    if (delay > 0) schedulePoll(pollApiResults, delay);
+    else await pollApiResults();
   } catch (error) {
-    if (state.source === 'live') displayOfficialStatus(false, 'Não foi possível conectar ao TSE; placar ilustrativo');
-    console.info('A corrida continua em modo demonstração.', error);
-    schedulePoll(connectToTse, state.realtime ? REALTIME_INTERVAL : POLL_INTERVAL);
+    if (state.source === 'live') displayOfficialStatus(false, 'Aguardando resultados · placar ilustrativo');
+    schedulePoll(connectToApi, state.realtime ? REALTIME_INTERVAL : POLL_INTERVAL);
   }
 }
 
-// Keeps a single pending TSE request, so real-time mode can reschedule it.
+// Keeps a single pending API request, so real-time mode can reschedule it.
 function schedulePoll(task, delay) {
   window.clearTimeout(state.pollTimer);
   state.pollTimer = window.setTimeout(task, delay);
 }
 
-function refreshFromTse() {
+function refreshFromApi() {
   window.clearTimeout(state.pollTimer);
-  if (state.resultUrl) pollTseResults();
-  else connectToTse();
+  if (state.connected) pollApiResults();
+  else connectToApi();
 }
 
 // Arms (or immediately applies) the switch to locked real time at 17h BRT.
@@ -403,9 +303,9 @@ function onRealtimeTimer() {
   if (!scheduleRealtimeLock()) return;
   // A new round starts: drop the previous round's result and load the new file.
   state.lastOfficial = null;
-  state.resultUrl = null;
+  state.connected = null;
   if (state.source === 'live') showDemoResults();
-  connectToTse();
+  connectToApi();
 }
 
 function lockRealtime() {
@@ -415,8 +315,8 @@ function lockRealtime() {
   state.realtime = true;
   updateLiveButton();
   simNote.textContent = `Divulgação oficial do ${state.round}º turno iniciada às 17h (horário de Brasília): `
-    + 'o modo tempo real fica fixo e consulta o TSE a cada 5 segundos.';
-  refreshFromTse();
+    + 'o modo tempo real acompanha os resultados automaticamente.';
+  refreshFromApi();
 }
 
 function unlockRealtime() {
@@ -441,12 +341,12 @@ function updateLiveButton() {
   liveButton.hidden = !show;
   barLive.parentElement.hidden = !show;
   if (!show) return;
-  liveButton.textContent = state.locked ? '↻ Tentar conectar ao TSE' : '● Começar tempo real';
+  liveButton.textContent = state.locked ? '↻ Tentar atualizar' : '● Começar tempo real';
   barLive.textContent = state.locked ? '↻ Reconectar' : '● Tempo real';
 }
 
 function startRealtimeManually() {
-  if (state.locked) refreshFromTse();
+  if (state.locked) refreshFromApi();
   else lockRealtime();
   updateLiveButton();
 }
@@ -458,7 +358,7 @@ function delayUntilDisclosure(dateText) {
   return Math.max(0, disclosureTime - Date.now());
 }
 
-// Renders an EA20 result and flashes the leader card on an overtake.
+// Renders a normalized API result and flashes the leader card on an overtake.
 function applyResult(result) {
   const previousLeaderId = drivers[0]?.id;
   const nextDrivers = flattenCandidates(result);
@@ -477,7 +377,7 @@ function applyResult(result) {
 
 function applyOfficialResult(result) {
   applyResult(result);
-  displayOfficialStatus(true, `Brasil · EA20 · gerado ${result.hg || 'horário indisponível'}`);
+  displayOfficialStatus(true, `Brasil · gerado ${result.generation || 'horário indisponível'}`);
   flagStaleResult(result);
   updateFinalScreen(result);
 }
@@ -490,13 +390,13 @@ const finalScreen = document.querySelector('#final-screen');
 const finalOpen = document.querySelector('#final-open');
 
 function updateFinalScreen(result) {
-  const complete = result.tf === 's' || parseTseNumber(result.s?.pst) >= 100;
-  const defined = result.md === 's';
+  const complete = result.complete || numeric(result.counted) >= 100;
+  const defined = result.defined;
   const decided = drivers.filter((driver) => driver.outcome);
   const ready = (complete || defined) && decided.length > 0;
   finalOpen.hidden = !ready;
   if (!ready) return;
-  const round = String(result.t || state.round || '1');
+  const round = String(result.round || state.round || '1');
   const elected = decided.find((driver) => driver.outcome === 'elected');
   const shown = elected ? [elected] : decided.filter((driver) => driver.outcome === 'runoff').slice(0, 2);
   document.querySelector('#final-kicker').textContent = `PRESIDENTE · BRASIL 2026 · RESULTADO DO ${round}º TURNO`;
@@ -527,11 +427,11 @@ function updateFinalScreen(result) {
   const runoffDate = state.roundDates?.[2];
   document.querySelector('#final-meta').textContent = [
     !complete ? 'Resultado matematicamente definido pelo TSE' : '',
-    `${formatVote(parseTseNumber(result.s?.pst))}% das seções totalizadas`,
-    `gerado ${result.dg || ''} ${result.hg || ''}`.trim(),
+    `${formatVote(numeric(result.counted))}% das seções totalizadas`,
+    `gerado ${result.generation || 'horário indisponível'}`,
     !elected && round === '1' && runoffDate ? `2º turno em ${runoffDate}` : '',
   ].filter(Boolean).join(' · ');
-  const key = `${result.ele || ''}-${round}`;
+  const key = `${result.election || ''}-${round}`;
   if (state.finalShownFor !== key) {
     state.finalShownFor = key;
     showFinalScreen(true);
@@ -549,14 +449,13 @@ finalOpen.addEventListener('click', () => showFinalScreen(true));
 // The TSE can keep answering with an old file; flag it once the generation
 // time is too far behind (the final totalization is not expected to change).
 function flagStaleResult(result) {
-  const [day, month, year] = String(result.dg || '').split('/').map(Number);
-  const generated = Date.parse(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${result.hg}-03:00`);
-  if (!Number.isFinite(generated) || result.tf === 's') return;
+  const generated = result.sourceGeneratedAt;
+  if (!Number.isFinite(generated) || result.complete) return;
   const minutes = Math.floor((Date.now() - generated) / 60_000);
   if (minutes < STALE_RESULT_MINUTES) return;
   setStatusBadge('stale', 'TSE SEM ATUALIZAÇÃO');
   document.querySelector('#source-detail').textContent =
-    `Arquivo do TSE sem mudança há ${minutes} min · gerado ${result.hg}`;
+    `Arquivo do TSE sem mudança há ${minutes} min · gerado ${result.generation}`;
 }
 
 function showDemoResults() {
@@ -582,7 +481,6 @@ function showDemoResults() {
 // and plays the count from 0% up to it. If that file is unavailable, a local
 // fictitious race is used instead. Both emit EA20-shaped files, so the race
 // follows the same path as real TSE data.
-const TSE_SIM_RESULT_URL = 'https://resultados-sim.tse.jus.br/simulado/simulado2026/ele2026/21270/dados/br/br-c0001-e021270-u.json';
 const LOCAL_SIM_CANDIDATES = [
   { n: '11', nm: 'Candidato A', sg: 'PARTIDO A', final: 38.4, early: -.17 },
   { n: '22', nm: 'Candidato B', sg: 'PARTIDO B', final: 34.1, early: .22 },
@@ -611,75 +509,32 @@ function reshuffleSimScenario(scenario) {
 }
 
 function localSimScenario() {
-  return {
-    source: 'local',
-    finalFile: null,
-    candidates: LOCAL_SIM_CANDIDATES.map((candidate) => ({
-      sqcand: `sim-${candidate.n}`, n: candidate.n, nmu: candidate.nm, sg: candidate.sg, dvt: 'Válido',
-      finalVap: Math.round(LOCAL_SIM_VALID_VOTES * candidate.final / 100), early: candidate.early,
-    })),
-  };
-}
-
-async function loadTseSimScenario() {
-  const response = await fetch(TSE_SIM_RESULT_URL, { cache: 'no-cache' });
-  if (!response.ok) throw new Error(`Simulado do TSE indisponível (${response.status}).`);
-  const finalFile = await response.json();
-  if (finalFile.f !== 's') throw new Error('O arquivo consultado não pertence ao simulado.');
-  const presidential = (finalFile.carg || []).find((office) => String(office.cd).padStart(4, '0') === '0001');
-  const candidates = (presidential?.agr || []).flatMap((group) =>
-    (group.par || []).flatMap((party) => (party.cand || []).map((candidate) => ({
-      sqcand: String(candidate.sqcand || candidate.n), n: candidate.n, nmu: candidate.nmu || candidate.nm,
-      sg: party.sg || group.com || group.nm, dvt: candidate.dvt || 'Válido',
-      finalVap: parseTseNumber(candidate.vap),
-      // Early sections over-represent some regions: shares start skewed and
-      // drift to the final result, which produces overtakes along the way.
-      early: (Math.random() - .5) * .5,
-    }))));
-  if (!candidates.length) throw new Error('O simulado do TSE não contém candidatos a Presidente.');
-  return { source: 'tse', finalFile, candidates };
+  return { source: 'local', candidates: LOCAL_SIM_CANDIDATES.map((candidate) => ({
+    id: `sim-${candidate.n}`, number: candidate.n, name: candidate.nm, party: candidate.sg,
+    finalVotes: Math.round(LOCAL_SIM_VALID_VOTES * candidate.final / 100), early: candidate.early,
+  })) };
 }
 
 function buildSimulatedResult(scenario, pct) {
-  if (pct >= 100 && scenario.finalFile) return scenario.finalFile;
   const progress = pct / 100;
   const drift = (1 - progress) ** 1.4;
-  const counted = scenario.candidates.map((candidate) => Math.round(
-    candidate.finalVap * progress * Math.max(.05, 1 + candidate.early * drift + (Math.random() - .5) * .02 * drift)));
-  const validVotes = scenario.candidates.reduce((total, candidate, index) =>
-    total + (String(candidate.dvt).toLowerCase().includes('anulado') ? 0 : counted[index]), 0);
-  const now = new Date();
-  const pad = (value) => String(value).padStart(2, '0');
-  return {
-    f: 's',
-    tf: pct >= 100 ? 's' : 'n',
-    dg: `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()}`,
-    hg: `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`,
-    s: { pst: pct.toFixed(2).replace('.', ',') },
-    v: { vv: String(validVotes) },
-    carg: [{
-      cd: '1',
-      agr: scenario.candidates.map((candidate, index) => ({
-        par: [{
-          sg: candidate.sg,
-          cand: [{ sqcand: candidate.sqcand, n: candidate.n, nmu: candidate.nmu, dvt: candidate.dvt, vap: String(counted[index]) }],
-        }],
-      })),
-    }],
-  };
+  const candidates = scenario.candidates.map((candidate, index) => ({ ...candidate,
+    color: kartPalette[index % kartPalette.length][0],
+    votes: Math.round(candidate.finalVotes * progress * Math.max(.05, 1 + candidate.early * drift)),
+  }));
+  const total = candidates.reduce((sum, candidate) => sum + candidate.votes, 0);
+  candidates.forEach((candidate) => { candidate.pct = total ? candidate.votes / total * 100 : 0; });
+  return { candidates, total, counted: pct, generation: new Date().toLocaleString('pt-BR'),
+    votes: { valid: total, blank: 0, null: 0, total }, complete: pct >= 100, round: String(state.round || 1) };
 }
 
 function showSimulationStatus(scenario, pct, lap) {
   state.official = false;
   const done = pct >= 100;
-  const fromTse = scenario.source === 'tse';
-  setStatusBadge('sim', fromTse ? 'SIMULADO DO TSE' : 'SIMULAÇÃO');
-  document.querySelector('#source-label').textContent = fromTse ? 'SIMULADO OFICIAL · TSE' : 'SIMULAÇÃO LOCAL';
-  document.querySelector('#source-detail').textContent = fromTse
-    ? `Ambiente de testes simulado2026 · aquecimento ${lap} · ${done ? 'reiniciando em instantes' : 'reprodução em loop'} · não é resultado`
-    : `Candidatos e votos fictícios · aquecimento ${lap} · ${done ? 'reiniciando em instantes' : 'não são resultados do TSE'}`;
-  document.querySelector('#last-update').innerHTML =
-    `${fromTse ? 'SIMULADO' : 'SIMULAÇÃO'} <small>${done ? 'reiniciando' : 'aquecendo antes do ao vivo'}</small>`;
+  setStatusBadge('sim', 'SIMULAÇÃO');
+  document.querySelector('#source-label').textContent = 'SIMULAÇÃO LOCAL';
+  document.querySelector('#source-detail').textContent = `Candidatos e votos fictícios · aquecimento ${lap} · ${done ? 'reiniciando em instantes' : 'não são resultados oficiais'}`;
+  document.querySelector('#last-update').innerHTML = `SIMULAÇÃO <small>${done ? 'reiniciando' : 'aquecendo antes do ao vivo'}</small>`;
   document.querySelector('.lap-counter strong').innerHTML = `${String(lap).padStart(2, '0')} <i>/</i> ∞`;
 }
 
@@ -688,13 +543,7 @@ async function startSimulation() {
   const run = ++state.simRun;
   state.source = 'sim';
   setStatusBadge('sim', 'CARREGANDO SIMULAÇÃO');
-  let scenario;
-  try {
-    scenario = await loadTseSimScenario();
-  } catch (error) {
-    console.info('Simulado do TSE indisponível; usando simulação local.', error);
-    scenario = localSimScenario();
-  }
+  const scenario = localSimScenario();
   // The user may have left the simulation while the file was loading.
   if (run !== state.simRun || state.source !== 'sim') return;
   // The simulation loops as a warm-up until the user stops it or the
@@ -730,17 +579,24 @@ function stopSimulation() {
   else showDemoResults();
 }
 
-async function pollTseResults() {
+async function pollApiResults() {
   try {
-    const response = await fetch(state.resultUrl, { cache: 'no-cache' });
-    if (!response.ok) throw new Error(`Resultados ainda não publicados (${response.status}).`);
-    const result = await response.json();
-    if (result.f !== 'o') throw new Error('O arquivo consultado não está marcado como oficial.');
-    if (!flattenCandidates(result).length) throw new Error('O arquivo EA20 ainda não tem votação para os candidatos.');
+    const payload = await ResultsApi.scope(String(state.round || realtimeWindow().round), 'br');
+    const result = payload.result.result;
+    if (!result || !result.candidates.length) throw new Error('A API ainda não publicou a votação.');
+    result.round = payload.context.round;
+    result.election = payload.context.election;
     state.lastOfficial = result;
     state.failures = 0;
     // During a simulation the official file is kept and shown when it ends.
-    if (state.source === 'live') applyOfficialResult(result);
+    if (state.source === 'live') {
+      applyOfficialResult(result);
+      if (payload.stale || payload.result.error) {
+        setStatusBadge('stale', 'ATUALIZAÇÃO ATRASADA');
+        document.querySelector('#source-label').textContent = 'ÚLTIMA LEITURA OFICIAL';
+        document.querySelector('#source-detail').textContent = 'Mostrando os últimos resultados disponíveis';
+      }
+    }
   } catch (error) {
     state.failures += 1;
     if (state.source !== 'live') {
@@ -758,7 +614,7 @@ async function pollTseResults() {
   } finally {
     const backoff = state.realtime ? REALTIME_INTERVAL
       : Math.min(MAX_RETRY_INTERVAL, POLL_INTERVAL * 2 ** Math.min(state.failures, 5));
-    schedulePoll(pollTseResults, backoff);
+    schedulePoll(pollApiResults, backoff);
   }
 }
 
@@ -1220,7 +1076,7 @@ scheduleRealtimeLock();
 updateCountdown();
 window.setInterval(updateCountdown, 1000);
 if (!state.locked) {
-  connectToTse();
+  connectToApi();
   // Until the disclosure starts, a looping simulation warms up the track.
   startSimulation();
 }

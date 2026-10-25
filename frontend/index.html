@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#04132e" />
+  <meta name="description" content="Explore os estados e municípios do Brasil no mapa interativo da Corrida da Apuração." />
+  <title>Mapa do Brasil — Corrida da Apuração</title>
+  <link rel="icon" href="favicon.ico" sizes="any" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="preload" href="data/mapa/brasil.json.gz" as="fetch" crossorigin fetchpriority="high" />
+  <link rel="stylesheet" href="mapa.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&amp;family=Manrope:wght@400;500;600;700;800&amp;display=swap" media="print" onload="this.media='all'" />
+  <script src="api-config.js" defer></script>
+  <script src="api-client.js" defer></script>
+  <script src="results-loader.js" defer></script>
+  <script src="mapa-resultados.js" defer></script>
+  <script src="mapa.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html" aria-label="Corrida da Apuração, início"><img src="logo.webp" alt="Corrida da Apuração" /></a>
+  </header>
+
+  <main>
+    <section class="map-stage" id="map-stage" aria-label="Explorador geográfico do Brasil">
+      <svg id="brazil-map" viewBox="0 0 900 900" aria-label="Mapa interativo dos estados do Brasil"><g id="territories"></g><g id="map-labels" aria-hidden="true"></g></svg>
+      <nav class="breadcrumbs" aria-label="Localização no mapa">
+        <button id="home-button" type="button" title="Voltar ao mapa do Brasil">Brasil</button>
+        <span id="state-crumb" hidden></span>
+      </nav>
+      <aside class="election-legend" aria-label="Legenda dos resultados eleitorais">
+        <div class="election-heading"><strong>Presidente</strong><select id="election-round" aria-label="Turno da eleição"><option value="2" selected>2º turno</option><option value="1">1º turno</option></select></div>
+        <div class="election-candidates" id="election-candidates"></div>
+        <p id="election-status" role="status">Carregando resultados…</p>
+        <small>Cor mais forte indica maior vantagem na votação.</small>
+      </aside>
+      <details class="place-picker" id="place-picker">
+        <summary><span aria-hidden="true">⌕</span><span id="search-label">Buscar estado</span><span class="picker-chevron" aria-hidden="true">⌄</span></summary>
+        <div class="picker-content">
+          <label class="search-box"><input id="territory-search" type="search" placeholder="Buscar estado ou sigla" aria-label="Buscar estado ou sigla" autocomplete="off" /></label>
+          <div class="territory-list" id="territory-list" aria-label="Estados do Brasil"></div>
+          <p class="empty-search" id="empty-search" hidden>Nenhum lugar encontrado.</p>
+        </div>
+      </details>
+      <div class="map-message" id="map-message" role="status"><span>Carregando o Brasil…</span><button id="retry-button" type="button" hidden>Tentar novamente</button></div>
+      <div class="map-tooltip" id="map-tooltip" hidden></div>
+      <div class="zoom-controls" aria-label="Controles do mapa">
+        <button id="zoom-in" type="button" aria-label="Aproximar mapa" title="Aproximar">+</button>
+        <button id="zoom-out" type="button" aria-label="Afastar mapa" title="Afastar">−</button>
+        <button id="reset-view" type="button" aria-label="Ajustar mapa à tela" title="Ajustar à tela">⛶</button>
+      </div>
+      <div class="map-hint" id="map-hint">Clique em um estado para explorar</div>
+      <div class="map-selection" id="map-selection" role="status" aria-live="polite" hidden>
+        <div><span id="map-selection-state"></span><strong id="map-selection-name"></strong></div>
+        <button id="focus-municipality" type="button" aria-label="Aproximar município selecionado" title="Aproximar município">⛶</button>
+        <button id="dismiss-selection" type="button" aria-label="Limpar município selecionado">×</button>
+        <p class="selection-result" id="map-selection-result"></p>
+        <a class="selection-results-link" id="map-results-link" href="estados.html?cargo=1&amp;turno=2">Ver resultados ↗</a>
+      </div>
+      <a class="map-credit" href="https://servicodados.ibge.gov.br/api/docs/malhas?versao=3" target="_blank" rel="noopener" title="Mapa: IBGE. Resultados: TSE. A cor mostra quem está na frente na votação.">Mapa: IBGE</a>
+    </section>
+  </main>
+</body>
+</html>

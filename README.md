@@ -1,60 +1,93 @@
 # Corrida da Apuração
 
-<p align="center">
-  <img src="logo.webp" alt="Corrida da Apuração" width="720" />
-</p>
+Mapa interativo e corrida visual para acompanhar a apuração presidencial. O projeto está separado entre site e serviço de dados.
 
-Uma corrida visual inspirada em jogos de kart para acompanhar a apuração presidencial. Cada piloto representa um candidato, e sua posição na pista acompanha sua porcentagem dos votos válidos.
+## Organização
 
-**Acesse:** [corridaeleicao.vercel.app](https://corridaeleicao.vercel.app/)
-
-## Recursos
-
-- Pista animada com karts e posições atualizadas conforme os resultados.
-- Classificação com candidatos, partidos e percentual de votos válidos.
-- Indicador de seções totalizadas, fonte dos dados e horário da atualização.
-- Dados oficiais do TSE quando disponíveis; placar de demonstração identificado enquanto isso.
-- Contagem regressiva para a divulgação e início automático das consultas em tempo real às 17h (horário de Brasília).
-- Simulação da apuração com dados de teste do TSE ou, se indisponíveis, dados fictícios identificados como simulação.
-- Visões panorâmica, aérea e do líder, além de modo de tela cheia.
-- Interface adaptada para desktop e dispositivos móveis.
-
-## Como executar localmente
-
-O projeto é estático, sem dependências ou etapa de build. Com Python 3 instalado, execute na pasta do projeto:
-
-```bash
-python3 -m http.server 8000
+```text
+frontend/             HTML, CSS, JavaScript, imagens e malhas do site
+backend/              Coletor Bun, SQLite, publicador R2 e dependências
+  .env.example        Exemplo de variáveis do servidor
+  Dockerfile          Imagem do coletor para Railway
+  railway.json        Deploy independente do backend
+  package.json        Dependências e comandos do backend
+test/
+  frontend/           Testes do mapa e do navegador
+  backend/            Testes do coletor e da publicação
+docs/                 Arquitetura, operação do R2 e conceito do jogo
+dist/frontend/        Site gerado para servir/publicar; ignorado pelo Git
+package.json          Atalhos para executar as tarefas pela raiz
+vercel.json           Build e diretório público do site na hospedagem atual
 ```
 
-Abra [http://localhost:8000](http://localhost:8000) no navegador. É necessário estar conectado à internet para carregar os arquivos públicos do TSE. Se os dados não estiverem disponíveis, o jogo continua com o placar ilustrativo.
+## Rodar o frontend
 
-## Controles
+Na raiz do repositório, com Node.js e Python 3:
 
-- **← / →:** girar a câmera.
-- **Pista / Aérea / Líder:** trocar o enquadramento.
-- **F ou Tela cheia:** abrir ou sair da visualização imersiva.
-- **Começar tempo real / Tentar conectar ao TSE:** só aparece depois das 17h (horário de Brasília) se a troca automática para o ao vivo não acontecer em 30 segundos, ou se os dados do TSE não estiverem chegando.
+```sh
+npm run dev:frontend
+```
 
-Antes das 17h (horário de Brasília), a página abre com a simulação da apuração em loop; não há botão para iniciá-la.
+Abra [localhost:8000](http://localhost:8000). O comando copia os arquivos públicos do frontend para `dist/frontend/` e serve essa pasta. Execute novamente após editar os arquivos; não há recarregamento automático.
 
-As opções também ficam disponíveis na barra de controles do modo de tela cheia.
+Para gerar apenas o site:
 
-## Dados eleitorais
+```sh
+npm run build:frontend
+```
 
-O jogo consulta os arquivos públicos de resultados do TSE. A classificação usa os votos válidos dos candidatos; a porcentagem de seções totalizadas aparece separadamente. A posição na pista representa o percentual de votos válidos, não o percentual de seções apuradas.
+Na Cloudflare, use esse comando de build, a raiz do repositório como diretório de trabalho e `dist/frontend` como saída pública. A configuração da hospedagem atual na Vercel também aponta para essa saída. Nenhum deploy remoto foi executado nesta reorganização.
 
-Resultados de demonstração e simulações são identificados na interface e não devem ser interpretados como resultados oficiais. A documentação detalhada está em [`game.md`](game.md).
+As páginas continuam sendo `/`, `/corrida.html` e `/estados.html` após publicar. Veja os recursos e detalhes do mapa no [README do frontend](frontend/README.md).
 
-## Arquivos do projeto
+## Rodar o backend
 
-- [`index.html`](index.html): página, metadados e estrutura da interface.
-- [`style.css`](style.css): apresentação responsiva.
-- [`game.js`](game.js): renderização da pista, controles, dados e simulação.
-- [`logo.webp`](logo.webp): logo usada no cabeçalho e neste README.
-- [`og-image.jpg`](og-image.jpg): imagem para compartilhamento em redes sociais.
-- [`game.md`](game.md): conceito e detalhes de funcionamento.
+Na raiz, com Bun 1.2.23 ou superior:
 
-## Tecnologias
+```sh
+cp backend/.env.example backend/.env
+bun run install:backend
+bun run collector
+```
 
-HTML, CSS e JavaScript nativos, Canvas 2D e arquivos públicos JSON do TSE.
+Revise `backend/.env` antes de iniciar: o coletor consulta o TSE de verdade. O padrão é coletar todas as UFs, todos os turnos e os cargos anunciados para o ciclo ele2026. `R2_ENABLED=false` mantém uploads desabilitados.
+
+Para uma única rodada, use `bun run collector:once`. Os atalhos executam dentro de `backend/`, onde ficam as variáveis, dependências e o banco local em `.collector/`.
+
+No Railway, configure **Root Directory: `/backend`**, **Railway Config File: `/backend/railway.json`** e anexe um volume em `/data`. O [Dockerfile](backend/Dockerfile) usa somente essa pasta. O frontend é publicado separadamente na Cloudflare/Vercel. Consulte a [operação do backend](backend/README.md) e a [configuração do R2](docs/r2.md).
+
+## Verificações
+
+```sh
+npm run test:frontend
+bun run test:collector
+```
+
+Para os testes de navegador, instale Google Chrome e use Node.js 22 ou superior:
+
+```sh
+npm run test:browser
+```
+
+Os testes usam respostas locais; os modos de consulta real estão documentados separadamente no [frontend](frontend/README.md). As dependências do backend são instaladas pelo comando `install:backend`.
+
+## Estado da integração
+
+O frontend consulta somente a nossa API. O backend é responsável por consultar o TSE, interpretar os arquivos, calcular os dados e servir ou publicar os resumos. Localmente, a API do Bun roda em `http://localhost:3000`; em produção, o domínio de dados configurado é `https://eleicoes.agendasalao.com`, com publicação opcional no R2 e cache na CDN. A implantação remota e a validação do bucket real ainda estão pendentes.
+
+A cobertura é nacional: Brasil, 27 UFs e os municípios anunciados pelo TSE, com os cargos e turnos efetivamente em disputa. Governador, Senador, deputados, Conselheiro Distrital e cargos de eleições suplementares são descobertos pela configuração oficial. O frontend oferece as seleções anunciadas, os resultados municipais e os painéis nacionais de parlamentares. A geometria continua independente da coleta. Fotos usam iniciais até existir cache de imagens no servidor.
+
+A operação, os intervalos e a validação com 5.568 municípios simulados estão em [Cobertura nacional](docs/cobertura-nacional.md).
+
+Resultados oficiais, simulações e demonstrações devem permanecer identificados. Nunca publicar credenciais do servidor junto aos arquivos estáticos.
+
+## Documentação
+
+- [Frontend e uso do mapa](frontend/README.md)
+- [Backend e Railway](backend/README.md)
+- [Contrato da API e configuração do frontend](docs/api.md)
+- [Arquitetura de coleta e cache](docs/arquitetura-dados.md)
+- [Publicação no R2, domínio, CORS e cache](docs/r2.md)
+- [Conceito e funcionamento da corrida](docs/game.md)
+- [Ideia original](docs/IDEIA.md)
+- [Dados geográficos](frontend/data/mapa/README.md)

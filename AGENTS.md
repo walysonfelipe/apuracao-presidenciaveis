@@ -2,11 +2,11 @@
 
 ## Project Structure & Module Organization
 
-The browser game is a small static project: `index.html` contains the page, `style.css` its responsive presentation, and `game.js` the race rendering and demo standings. `game.md` documents the game concept and how to use the prototype. No test or asset directories are currently needed.
+The static browser game lives in `frontend/`, including pages, styles, browser scripts, images and geographic data. `backend/` contains the Bun collector, SQLite persistence, R2 publisher, server environment example, dependencies and Dockerfile. All TSE parsing and electoral rules belong exclusively to the backend; the frontend consumes normalized API data and never queries TSE directly. `docs/` holds architecture and concept documentation; tests are grouped under `test/frontend/` and `test/backend/`.
 
 ## Build, Test, and Development Commands
 
-Run `python3 -m http.server 8000` from the repository root and open `http://localhost:8000` to run the game. There is no build step or test/lint command configured. The browser fetches public TSE election JSON when available and falls back to clearly labeled demo data.
+From the repository root, run `npm run dev:frontend` and open `http://localhost:8000`. `npm run build:frontend` copies public frontend files into `dist/frontend/`; serve and publish only that generated directory. Run `bun run install:backend` to install server dependencies, then `bun run collector` to collect real TSE data. Backend secrets belong in `backend/.env` or Railway variables. Run `npm run test:frontend`, `bun run test:collector`, and `npm run test:browser` (requires Chrome) as appropriate. No linter is configured.
 
 ## Coding Style & Naming Conventions
 
@@ -14,7 +14,7 @@ Use two spaces for indentation in HTML, CSS, and JavaScript. Keep JavaScript bro
 
 ## Testing Guidelines
 
-There is no test framework or test suite in the current repository. If tests are added, place them in a dedicated test directory, name them for the behavior being checked, and document how to run them.
+Place browser/map checks in `test/frontend/` and collector/publisher checks in `test/backend/`. Use local responses for load and failure tests, without multiplying requests to the TSE. Document relevant commands and keep frontend and backend deploy paths consistent after moves.
 
 ## Commit & Pull Request Guidelines
 

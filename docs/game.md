@@ -6,7 +6,7 @@ Uma corrida visual inspirada em jogos de kart. Cada candidato é um competidor n
 
 ## Abrir o jogo
 
-Sirva a pasta com `python3 -m http.server 8000` e abra `http://localhost:8000` em um navegador moderno. O jogo usa HTML, CSS e JavaScript sem dependências ou etapa de build. A página tenta consultar o TSE; se os arquivos ainda não estiverem publicados ou a conexão falhar, exibe os dados de demonstração identificados como tal.
+Na raiz do repositório, execute `npm run dev:frontend` e abra `http://localhost:8000` em um navegador moderno. O jogo usa HTML, CSS e JavaScript sem dependências de execução; uma etapa de cópia reúne os arquivos públicos do frontend em `dist/frontend/`. A página consulta nossa API de resultados; se os arquivos ainda não estiverem publicados ou a conexão falhar, exibe os dados de demonstração identificados como tal.
 
 ## Como funciona
 
@@ -29,14 +29,12 @@ O protótipo começa direto na pista. Use as setas esquerda/direita para girar a
 
 ## Simulação da apuração
 
-Antes da divulgação oficial, a página abre com a simulação da apuração rodando sozinha, sem botão para iniciá-la. Ela usa o [ambiente de simulado oficial do TSE](https://www.tse.jus.br/eleicoes/informacoes-tecnicas-sobre-a-divulgacao-de-resultados) (`https://resultados-sim.tse.jus.br/simulado`, ambiente `simulado2026`, eleição 21270). Ele carrega o arquivo final de Presidente desse ambiente (`br-c0001-e021270-u.json`) e reproduz a apuração, do 0% até a totalização final do teste, em cerca de três minutos. A contagem começa devagar, acelera no meio e desacelera no fim. Ao concluir, a simulação espera alguns segundos e recomeça do 0% com novas variações, em loop, como um aquecimento até a divulgação oficial começar; o contador de voltas mostra qual aquecimento está em andamento. Os candidatos são os de teste publicados pelo TSE. A tela identifica tudo como **SIMULADO DO TSE · não é resultado**.
+Antes da divulgação oficial, a página abre com uma simulação local da apuração, com candidatos fictícios identificados como **SIMULAÇÃO**. Ela não consulta o ambiente de teste do TSE. A contagem começa devagar, acelera no meio e desacelera no fim; ao concluir, espera alguns segundos e recomeça com novas variações.
 
-Se o simulado do TSE estiver indisponível, roda uma simulação local com candidatos fictícios (Candidato A a F), identificada como **SIMULAÇÃO**. As duas passam pelo mesmo código que lê os arquivos reais (EA20). Às 17h ela para e o modo em tempo real assume sozinho. O botão **Começar tempo real** fica escondido e só aparece se, 30 segundos depois das 17h, a troca automática não tiver acontecido; depois disso, vira **Tentar conectar ao TSE** enquanto os dados oficiais não chegarem ou após três falhas seguidas de consulta.
-
-O modo real continua funcionando durante a simulação. A consulta ao ambiente `oficial` (eleição 6257, 1º turno em 04/10/2026) começa às 17h (horário de Brasília). Se um arquivo oficial chegar durante a simulação, ele é guardado e aparece quando a simulação termina.
+Às 17h, o modo ao vivo acompanha exclusivamente a API. A classificação, os votos, o percentual de seções e as situações das candidaturas chegam normalizados pelo backend. Se a API estiver indisponível, a página mantém a última leitura oficial ou uma demonstração identificada.
 
 ## Dados
 
-O protótipo consulta os arquivos públicos do TSE em `https://resultados.tse.jus.br/oficial`. Ele respeita a eleição e os diretórios anunciados na configuração EA11 e consome EA20 para o resultado nacional de Presidente. A tela identifica a fonte e a geração do arquivo. Se os dados não estiverem publicados ou estiverem indisponíveis, mantém o placar ilustrativo claramente identificado; falhas sucessivas usam espera progressiva para evitar excesso de consultas.
+O backend consulta os arquivos públicos do TSE e prepara o resultado nacional de Presidente. O frontend lê apenas o contrato da nossa API, sem interpretar EA11/EA20. A tela identifica a fonte e a geração do arquivo. Se os dados não estiverem publicados ou estiverem indisponíveis, mantém o placar ilustrativo claramente identificado; falhas sucessivas usam espera progressiva para evitar excesso de consultas.
 
 Referências: [informações técnicas de divulgação do TSE](https://www.tse.jus.br/eleicoes/informacoes-tecnicas-sobre-a-divulgacao-de-resultados) e [especificação EA20](https://www.tse.jus.br/eleicoes/eleicoes-2026-content/arquivos/divulgacao-de-resultados/tse-ea20-arquivo-de-resultado-unificado).
