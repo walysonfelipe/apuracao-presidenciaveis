@@ -2,7 +2,7 @@
   <img src="./image.png" alt="Presidenciáveis — mapa da apuração presidencial" width="850" />
 </p>
 
-<h1 align="center">Corrida da Apuração · Presidenciáveis</h1>
+<h1 align="center">Presidenciáveis</h1>
 
 <p align="center">
   Apuração presidencial do Brasil, dos estados e dos municípios em um mapa interativo.<br />
