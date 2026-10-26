@@ -147,6 +147,47 @@ function TerritoryTip({ name, place, entry, round }) {
   );
 }
 
+// Remembers per browser which declared winner was already shown, so reloads do not reopen the modal.
+const SEEN_KEY = 'eleito-visto';
+const seenWinner = () => { try { return localStorage.getItem(SEEN_KEY); } catch { return null; } };
+const markWinner = (id) => { try { localStorage.setItem(SEEN_KEY, id); } catch {} };
+
+function WinnerModal({ dialogRef, candidate, round, onClose }) {
+  const close = () => dialogRef.current?.close();
+  return (
+    <dialog ref={dialogRef} className="winner-modal" aria-labelledby="winner-name" style={{ '--candidate-color': candidate?.color }}
+      onClose={onClose} onClick={(event) => { if (event.target === event.currentTarget) close(); }}>
+      {candidate && <div className="winner-card">
+        <button type="button" className="winner-close" aria-label="Fechar" onClick={close}>×</button>
+        <span className="winner-photo">
+          <span className="candidate-portrait winner-portrait">
+            {candidate.name.trim().charAt(0)}
+            <img src={`/api/fotos/${round}/${candidate.id}`} alt={`Foto de ${candidate.name}`} width={128} height={128} decoding="async"
+              onError={(event) => { event.currentTarget.hidden = true; }} />
+          </span>
+          <span className="winner-check" aria-hidden="true">✓</span>
+        </span>
+        <span className="winner-kicker">Presidente eleito</span>
+        <h2 id="winner-name">{candidate.name}</h2>
+        <span className="winner-party"><i />{candidate.number ? `${candidate.party} · ${candidate.number}` : candidate.party}</span>
+        {candidate.pct != null && <dl className="winner-stats">
+          <div><dt>Votos válidos</dt><dd>{pct(candidate.pct)}</dd></div>
+          <div><dt>Votos</dt><dd>{count(candidate.votes)}</dd></div>
+        </dl>}
+        {candidate.official ? <div className="winner-status">
+          <span className="winner-chip is-official">Declarado pelo TSE</span>
+          <p>Resultado oficial do {round}º turno.</p>
+        </div> : <div className="winner-status">
+          <span className="winner-chip">Definido matematicamente</span>
+          <p>A vantagem já supera todos os votos que faltam apurar.</p>
+          <p className="winner-pending"><i aria-hidden="true" />Aguardando a declaração oficial do TSE</p>
+        </div>}
+        <button type="button" className="winner-ok" onClick={close} autoFocus>Ver o mapa</button>
+      </div>}
+    </dialog>
+  );
+}
+
 function readHash() {
   const params = new URLSearchParams(window.location.hash.slice(1));
   return { uf: params.get('uf'), municipality: params.get('municipio'), round: params.get('turno') === '1' ? '1' : '2' };
@@ -158,6 +199,7 @@ export default function ElectionMap() {
   const tooltipRef = useRef(null);
   const pickerRef = useRef(null);
   const searchRef = useRef(null);
+  const winnerRef = useRef(null);
   const view = useRef({ current: null, fitted: null, drag: null, suppressClick: false, pointers: new Map(), request: 0, prefetch: null });
   const scopes = useRef(new Map());
   const [states, setStates] = useState([]);
@@ -172,6 +214,8 @@ export default function ElectionMap() {
   const [notice, setNotice] = useState('');
   const [hidden, setHidden] = useState(false);
   const [hovered, setHovered] = useState(null);
+  // National winner per round, kept from the last Brasil payload so state views can show it too.
+  const [national, setNational] = useState({});
   const pointer = useRef(null);
 
   const items = uf ? municipalities : states;
@@ -337,7 +381,8 @@ export default function ElectionMap() {
         event.preventDefault();
         setPickerOpen(true);
       }
-      if (event.key === 'Escape') {
+      // The open modal handles Escape itself.
+      if (event.key === 'Escape' && !winnerRef.current?.open) {
         if (pickerRef.current?.open) setPickerOpen(false);
         else if (selected) setSelected(null);
         else if (uf) home();
@@ -477,6 +522,32 @@ export default function ElectionMap() {
   const panelEntry = selected ? record(selected) : results?.key === scopeKey ? results.summary : null;
   const panel = panelEntry?.result;
   const legend = panel?.candidates || entries.find((entry) => entry?.result)?.result.candidates || [];
+  const learnNational = useCallback((value) => {
+    const [valueRound, valueUf] = value?.key?.split(':') || [];
+    if (valueUf !== 'br') return;
+    const { elected: official, decided } = value.summary?.result || {};
+    const id = official || decided;
+    const row = value.summary.result.candidates.find((candidate) => candidate.id === id);
+    if (id && value.candidates?.[id]) setNational((known) => ({ ...known,
+      [valueRound]: { id, official: Boolean(official), ...value.candidates[id], votes: row?.votes, pct: row?.pct } }));
+  }, []);
+  useEffect(() => { learnNational(results); }, [results, learnNational]);
+  // Opened straight into a state: read Brasil once (shared cache) to learn whether the runoff is decided.
+  const knowsNational = Boolean(national[round]);
+  useEffect(() => {
+    if (round === '2' && !knowsNational && scopeKey !== '2:br') loadResults('2', 'br').then(learnNational).catch(() => {});
+  }, [round, knowsNational, scopeKey, learnNational]);
+  // The TSE declaration (repeated in every file of the round) wins; otherwise the national mathematical decision.
+  const officialId = results?.key === scopeKey ? panel?.elected || results.summary?.result?.elected : null;
+  // Vote numbers only come from the national summary, never from the open state or city.
+  const nationalStats = national[round]?.id === officialId ? national[round] : {};
+  const elected = officialId && results.candidates?.[officialId]
+    ? { ...nationalStats, id: officialId, official: true, ...results.candidates[officialId] } : national[round] || null;
+  const electedId = elected?.id || null;
+  const openWinner = useCallback(() => { if (!winnerRef.current?.open) winnerRef.current?.showModal(); }, []);
+  useEffect(() => {
+    if (electedId && elected && seenWinner() !== `${round}:${electedId}`) openWinner();
+  }, [electedId, Boolean(elected), round, openWinner]);
   // Until any territory has votes, map and panel show an animated skeleton instead of zeros.
   const waiting = !withVotes;
   const [waitColor, waitAlt] = legend.length > 1 ? legend.map((candidate) => candidate.color) : WAIT_COLORS;
@@ -522,16 +593,39 @@ export default function ElectionMap() {
           </select>
         </div>
         <div className="election-place">{place}</div>
+        {elected && !legend.some((candidate) => candidate.id === electedId) && <button type="button" className="election-winner" style={{ '--candidate-color': elected.color }} onClick={openWinner}
+          aria-label={`${elected.name} eleito, ${elected.official ? 'declarado pelo TSE' : 'definido matematicamente'}. Ver detalhes`}>
+          <span className="winner-photo is-small" aria-hidden="true">
+            <span className="candidate-portrait">
+              {elected.name.trim().charAt(0)}
+              <img src={`/api/fotos/${round}/${elected.id}`} alt="" width={36} height={36} decoding="async"
+                onError={(event) => { event.currentTarget.hidden = true; }} />
+            </span>
+            <span className="winner-check">✓</span>
+          </span>
+          <span className="election-winner-text">
+            <small><b>Eleito</b>{elected.official ? 'Declarado pelo TSE' : 'Definido matematicamente'}</small>
+            <strong>{elected.name} <em>{elected.party}</em></strong>
+          </span>
+          <span className="election-winner-arrow" aria-hidden="true">›</span>
+        </button>}
         <div className="election-candidates">
           {(legend.length || !waiting ? legend : SKELETON_ROWS).map((candidate) => (
-            <div className="candidate-row" key={candidate.id} style={{ '--candidate-color': candidate.color }}>
-              <span className={`candidate-portrait${candidate.name ? '' : ' skeleton'}`} aria-hidden="true">
-                {candidate.name?.trim().charAt(0)}
-                {candidate.name && <img src={`/api/fotos/${round}/${candidate.id}`} alt="" width={40} height={40} loading="lazy" decoding="async"
-                  onError={(event) => event.currentTarget.remove()} />}
+            <div className={`candidate-row${candidate.id === electedId ? ' is-elected' : ''}`} key={candidate.id} style={{ '--candidate-color': candidate.color }}>
+              <span className="winner-photo is-small" aria-hidden="true">
+                <span className={`candidate-portrait${candidate.name ? '' : ' skeleton'}`}>
+                  {candidate.name?.trim().charAt(0)}
+                  {candidate.name && <img src={`/api/fotos/${round}/${candidate.id}`} alt="" width={40} height={40} loading="lazy" decoding="async"
+                    onError={(event) => event.currentTarget.remove()} />}
+                </span>
+                {candidate.id === electedId && <span className="winner-check">✓</span>}
               </span>
               <span className="candidate-name">
-                {candidate.name ? <><strong>{candidate.name}</strong><small>{candidate.party}</small></> : <><i className="skeleton" /><i className="skeleton is-short" /></>}
+                {candidate.name ? <>
+                  <strong>{candidate.name}{candidate.id === electedId && <button type="button" className="elected-badge" onClick={openWinner}
+                    aria-label={`${candidate.name} eleito, ${elected.official ? 'declarado pelo TSE' : 'definido matematicamente'}. Ver detalhes`}>Eleito <span aria-hidden="true">›</span></button>}</strong>
+                  <small>{candidate.party}</small>
+                </> : <><i className="skeleton" /><i className="skeleton is-short" /></>}
               </span>
               <span className="candidate-score">
                 {waiting ? <><i className="skeleton" /><i className="skeleton is-short" /></> : <>
@@ -542,6 +636,7 @@ export default function ElectionMap() {
               <span className="candidate-bar" aria-hidden="true">
                 <i className={waiting ? 'is-waiting' : undefined} style={waiting ? undefined : { width: `${panel ? candidate.pct : 0}%`, background: candidate.color }} />
               </span>
+              {candidate.id === electedId && <span className="elected-status">{elected.official ? 'Declarado pelo TSE' : 'Definido matematicamente · aguardando o TSE'}</span>}
             </div>
           ))}
         </div>
@@ -606,6 +701,7 @@ export default function ElectionMap() {
           <button type="button" aria-label="Limpar município selecionado" onClick={() => setSelected(null)}>×</button>
         </div>
       )}
+      <WinnerModal dialogRef={winnerRef} candidate={elected} round={round} onClose={() => { if (electedId) markWinner(`${round}:${electedId}`); }} />
       <a className="map-credit" href="https://servicodados.ibge.gov.br/api/docs/malhas?versao=3" target="_blank" rel="noopener" title="Mapa: IBGE. Resultados: TSE. A cor mostra quem está na frente na votação.">Mapa: IBGE · Resultados: TSE</a>
     </section>
   );

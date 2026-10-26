@@ -63,6 +63,35 @@ test('adaptador valida turno, ambiente e território e preserva zeros à esquerd
   assert.strictEqual(summarize(zero, election, 'br').fill, EMPTY_FILL);
 });
 
+test('eleito vem só da situação declarada pelo TSE', () => {
+  assert.strictEqual(summarize(sample('br'), election, 'br').elected, null);
+  const runoff = sample('br');
+  runoff.carg[0].agr[0].par.forEach((party) => Object.assign(party.cand[0], { e: 's', st: '2º turno' }));
+  assert.strictEqual(summarize(runoff, election, 'br').elected, null);
+  const declared = sample('br');
+  Object.assign(declared.carg[0].agr[0].par[0].cand[0], { e: 's', st: 'Eleito' });
+  Object.assign(declared.carg[0].agr[0].par[1].cand[0], { e: 'n', st: 'Não eleito' });
+  const result = summarize(declared, election, 'br');
+  assert.strictEqual(result.elected, '100');
+  assert.ok(result.candidates.every((candidate) => !('elected' in candidate)));
+  declared.carg[0].agr[0].par[1].cand[0].st = 'Eleito';
+  assert.throws(() => summarize(declared, election, 'br'));
+});
+
+test('2º turno nacional só é definido quando a vantagem supera tudo o que falta apurar', () => {
+  // Candidato A lidera por 20 votos.
+  const open = (esnt, extra = {}) => sample('br', null, { e: { te: '150', c: '111', a: '39', esnt, ...extra } });
+  assert.strictEqual(summarize(sample('br'), election, 'br').decided, null);
+  assert.strictEqual(summarize(open('19'), election, 'br').decided, '100');
+  assert.strictEqual(summarize(open('20'), election, 'br').decided, null);
+  assert.strictEqual(summarize(open('0', { te: '170' }), election, 'br').decided, null);
+  const annulled = open('10');
+  annulled.v.vansj = '10';
+  assert.strictEqual(summarize(annulled, election, 'br').decided, null);
+  assert.strictEqual(summarize(sample('sp', null, { e: { te: '150', c: '111', a: '39', esnt: '0' } }), election, 'sp').decided, null);
+  assert.strictEqual(summarize({ ...open('0'), t: '1' }, { code: '6258', round: '1' }, 'br').decided, null);
+});
+
 test('primeira consulta responde na hora e preenche o pedaço em segundo plano', async () => {
   const h = harness();
   const first = await h.results.scope('2', 'sp');

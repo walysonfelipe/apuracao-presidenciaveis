@@ -118,6 +118,20 @@ button, summary { cursor: pointer; }
 .election-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
 .election-heading select { min-height: 32px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 5px; background: #10283f; color: var(--ice); font: inherit; }
 .election-place { margin-top: 8px; font: 500 10px var(--mono); color: var(--gold); text-transform: uppercase; letter-spacing: .04em; overflow-wrap: anywhere; }
+.election-winner { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 10px; padding: 8px 10px 8px 8px; border: 1px solid var(--line); border-radius: 10px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--candidate-color) 18%, transparent), transparent 75%), #0c2038; color: var(--ice); text-align: left; font: inherit; transition: border-color .15s; }
+.election-winner:hover { border-color: #ffd60080; }
+.election-winner:focus-visible { outline: 0; border-color: var(--gold); }
+.winner-photo.is-small { flex: none; margin: 0; }
+.winner-photo.is-small .candidate-portrait { width: 36px; height: 36px; font-size: 13px; }
+.winner-photo.is-small .winner-check { right: -3px; bottom: -3px; width: 16px; height: 16px; border-width: 2px; border-color: #0c2038; font-size: 8px; }
+.election-winner-text { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.election-winner-text small { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; font-weight: 600; }
+.election-winner-text small b { color: var(--gold); font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.election-winner-text strong { overflow: hidden; font-size: 15px; font-weight: 800; white-space: nowrap; text-overflow: ellipsis; }
+.election-winner-text em { margin-left: 4px; color: var(--muted); font-size: 11px; font-style: normal; font-weight: 700; }
+.election-winner-arrow { flex: none; color: var(--muted); font-size: 22px; line-height: 1; transition: transform .15s, color .15s; }
+.election-winner:hover .election-winner-arrow { color: var(--gold); transform: translateX(2px); }
 .election-candidates { max-height: 190px; overflow-y: auto; display: grid; gap: 10px; margin-top: 10px; }
 .election-candidates:empty { margin: 0; }
 .candidate-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; column-gap: 10px; row-gap: 5px; }
@@ -126,6 +140,23 @@ button, summary { cursor: pointer; }
 .candidate-name { min-width: 0; display: grid; gap: 2px; }
 .candidate-name strong { font-size: 11px; overflow-wrap: anywhere; }
 .candidate-name small, .candidate-score small { font: 9px var(--mono); color: var(--muted); }
+.candidate-row .winner-photo.is-small .candidate-portrait { width: 40px; height: 40px; font-size: 14px; }
+.candidate-row.is-elected { grid-template-columns: 56px minmax(0, 1fr) auto; column-gap: 10px; row-gap: 8px; margin: 0 -8px; padding: 10px 8px; border-radius: 12px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--candidate-color) 18%, transparent), transparent 85%); }
+.candidate-row.is-elected .winner-photo.is-small .candidate-portrait { width: 56px; height: 56px; border-width: 3px; font-size: 20px; }
+.candidate-row.is-elected .winner-photo.is-small .winner-check { width: 20px; height: 20px; font-size: 10px; }
+.candidate-row.is-elected .candidate-name { gap: 3px; }
+.candidate-row.is-elected .candidate-name strong { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; font-size: 16px; line-height: 1.1; }
+.candidate-row.is-elected .candidate-name small { font-size: 10px; }
+.candidate-row.is-elected .candidate-score strong { font-size: 22px; font-weight: 600; white-space: nowrap; }
+.candidate-row.is-elected .candidate-score small { white-space: nowrap; }
+.candidate-row.is-elected .candidate-score small { font-size: 10px; }
+.candidate-row.is-elected .candidate-bar { height: 6px; border-radius: 3px; }
+.elected-badge { display: inline-flex; align-items: center; gap: 3px; margin-left: 7px; padding: 2px 6px 2px 7px; border: 0; border-radius: 4px; background: var(--gold); color: var(--navy); font: 800 9px var(--body); letter-spacing: .08em; text-transform: uppercase; vertical-align: 1px; transition: filter .15s; }
+.elected-badge span { font-size: 12px; line-height: 9px; }
+.elected-badge:hover { filter: brightness(1.08); }
+.elected-badge:focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
+.elected-status { grid-column: 1 / -1; margin-top: -2px; color: var(--gold); font-size: 10px; font-weight: 700; line-height: 1.3; }
 .candidate-score { display: grid; gap: 2px; text-align: right; }
 .candidate-score strong { font: 500 16px var(--mono); }
 .candidate-bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: #10283f; overflow: hidden; }
@@ -137,7 +168,40 @@ button, summary { cursor: pointer; }
 .candidate-portrait.skeleton { width: 40px; height: 40px; border-radius: 50%; }
 @keyframes bar-sweep { from { background-position: -100% 0; } to { background-position: 200% 0; } }
 @keyframes skeleton-shimmer { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+
+.winner-modal { width: min(380px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; overflow: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--navy); color: var(--ice); box-shadow: 0 24px 80px #000c; }
+.winner-modal[open] { animation: winner-in .28s ease-out; }
+.winner-modal::backdrop { background: #020a18d9; backdrop-filter: blur(3px); }
+.winner-card { position: relative; display: grid; justify-items: center; padding: 36px 28px 24px; text-align: center;
+  background: radial-gradient(120% 60% at 50% 0%, color-mix(in srgb, var(--candidate-color) 32%, transparent), transparent 70%); }
+.winner-close { position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 50%; background: #ffffff14; color: var(--muted); font-size: 18px; line-height: 1; }
+.winner-close:hover { background: #ffffff26; color: var(--ice); }
+.winner-photo { position: relative; margin-bottom: 18px; }
+.winner-portrait { width: 128px; height: 128px; border-width: 3px; font-size: 44px; box-shadow: 0 0 0 6px color-mix(in srgb, var(--candidate-color) 22%, transparent), 0 12px 32px #0008; }
+.winner-check { position: absolute; right: 2px; bottom: 4px; display: grid; place-items: center; width: 32px; height: 32px; border: 3px solid var(--navy); border-radius: 50%; background: var(--gold); color: var(--navy); font-size: 15px; font-weight: 800; }
+.winner-kicker { color: var(--gold); font: 800 11px var(--body); letter-spacing: .16em; text-transform: uppercase; }
+.winner-card h2 { margin: 6px 0 8px; font-size: 34px; font-weight: 800; line-height: 1.05; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.winner-party { display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px; border-radius: 999px; background: #ffffff0f; color: #c9d6e5; font-size: 12px; font-weight: 700; }
+.winner-party i { width: 8px; height: 8px; border-radius: 50%; background: var(--candidate-color); }
+.winner-stats { display: grid; grid-template-columns: 1fr 1fr; width: 100%; margin: 22px 0 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.winner-stats div { padding: 14px 8px; }
+.winner-stats div + div { border-left: 1px solid var(--line); }
+.winner-stats dt { color: var(--muted); font-size: 11px; font-weight: 600; }
+.winner-stats dd { margin: 4px 0 0; font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.winner-stats div:first-child dd { color: var(--gold); }
+.winner-status { display: grid; justify-items: center; gap: 8px; margin-top: 18px; }
+.winner-status p { margin: 0; color: #c9d6e5; font-size: 13px; line-height: 1.45; text-wrap: balance; }
+.winner-chip { padding: 4px 10px; border: 1px solid #ffd60066; border-radius: 999px; color: var(--gold); font-size: 11px; font-weight: 800; letter-spacing: .02em; }
+.winner-chip.is-official { border-color: transparent; background: var(--gold); color: var(--navy); }
+.winner-status .winner-pending { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+.winner-pending i { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); animation: winner-pulse 1.6s ease-in-out infinite; }
+@keyframes winner-pulse { 50% { opacity: .3; } }
+.winner-ok { width: 100%; margin-top: 20px; padding: 13px 20px; border: 0; border-radius: 8px; background: var(--gold); color: var(--navy); font-size: 13px; font-weight: 800; }
+.winner-ok:hover { filter: brightness(1.06); }
+@keyframes winner-in { from { opacity: 0; transform: translateY(12px) scale(.97); } }
+
 @media (prefers-reduced-motion: reduce) {
+  .winner-modal[open], .winner-pending i { animation: none; }
   .map-stage.is-waiting .territory { animation: none; fill: var(--wait-fill); fill-opacity: .55; }
   .skeleton, .candidate-bar i.is-waiting { animation: none; }
 }
