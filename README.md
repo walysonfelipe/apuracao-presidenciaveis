@@ -10,6 +10,8 @@
 </p>
 
 <p align="center">
+  <a href="README-INICIANTES.md">Guia para iniciantes</a> ·
+  <a href="README-INICIANTES.md#a-arquitetura-em-desenhos">Arquitetura em desenhos</a> ·
   <a href="#arquitetura">Arquitetura</a> ·
   <a href="#executar-localmente">Instalação</a> ·
   <a href="#cloudflare-r2">R2</a> ·
@@ -18,6 +20,8 @@
 </p>
 
 ## Visão geral
+
+Para quem está começando em programação ou quer uma explicação sem termos técnicos, veja o [guia para iniciantes](README-INICIANTES.md).
 
 Aplicação Next.js com App Router, uma página de navegação e duas rotas de API: resultados e fotos das candidaturas. O mapa permite alternar turnos, abrir uma UF, selecionar territórios, pesquisar localidades e consultar votos, percentuais, seções apuradas, brancos, nulos e abstenção conforme os dados disponíveis.
 
